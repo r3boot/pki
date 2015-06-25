@@ -1,0 +1,22 @@
+{
+    "CN": "AS65342 Root CA",
+    "key": {
+        "algo": "rsa",
+        "size": 4096
+    },
+    "sign": {
+        "hash": "sha512"
+    },
+    "names": [
+        {
+            "C":  "NL",
+            "L":  "Amersfoort",
+            "O":  "AS65342",
+            "OU": "PKI services",
+            "ST": "Utrecht"
+        }
+    ],
+    "name": "as65342",
+    "baseurl": "http://pki.as65342.net",
+    "basedir": "/people/r3boot/git/pki/workspace"
+}
