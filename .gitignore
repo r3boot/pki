@@ -2,4 +2,4 @@
 *.pyc
 */build
 */build/*
-workdir
+workspace/*
