@@ -1,4 +1,5 @@
 import sys
+import pprint
 
 def print_message(prefix, message):
     print('{0} {1}'.format(prefix, message))
@@ -15,6 +16,9 @@ def error(message):
 
 def debug(message):
     print_message('[D]', message)
+
+def dump(obj):
+    pprint.pprint(obj)
 
 if __name__ == '__main__':
     info('This is an informational message')

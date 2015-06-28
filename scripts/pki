@@ -3,10 +3,13 @@
 import os
 import sys
 import jinja2
+import yaml
+
 sys.path.append('.')
 
 from pki.logging    import *
 from pki            import jsoncfg
+from pki            import openssl
 
 __appname__ = 'AS65342 pki'
 __version__ = 0.1
@@ -14,6 +17,7 @@ __version__ = 0.1
 valid_operations = [
     'initca',
 ]
+
 
 if __name__ == '__main__':
     if len(sys.argv) < 2 or sys.argv[1] in ['-h', '-H', 'help']:
@@ -26,52 +30,28 @@ if __name__ == '__main__':
     appdir = os.path.dirname(appdir)
     os.umask(022)
 
+    # Reopen stdout and stderr as unbuffered
+    sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
+    sys.stderr = os.fdopen(sys.stderr.fileno(), 'w', 0)
+
+    cfg_file = '{0}/config/pki.yml'.format(appdir)
+    if not os.path.exists(cfg_file):
+        error('Cannot find {0}'.format(cfg_file))
+    raw_cfg = open(cfg_file, 'r').read()
+    config = yaml.load(raw_cfg)
+    config['appdir'] = appdir
+
     operation = sys.argv[1]
     if operation not in valid_operations:
         error('{0} is an invalid operation'.format(operation))
 
     if operation == 'initca':
-        if len(sys.argv) != 3:
-            error('Usage: {0} {1} <json file containing parameters>'.format(
-                os.path.basename(sys.argv[0]), sys.argv[1]))
-        if not os.path.exists(sys.argv[2]):
-            error('{0} does not exist'.format(sys.argv[2]))
-        config = jsoncfg.load_config(sys.argv[2])
-
-        if 'basedir' not in config:
+        if 'basedir' not in config['root']:
             info('Using CWD as the basedir for the CA')
-            config['basedir'] = '.'
-        info('Using {0} as the basedir for the CA'.format(config['basedir']))
+            config['root']['basedir'] = '.'
+        info('Using {0} as the basedir for the CA'.format(config['root']['basedir']))
 
-        cfgdir = '{0}/cfg'.format(config['basedir'])
-        if not os.path.exists(cfgdir):
-            info('Setting up configuration directory')
-            os.mkdir(cfgdir)
-
-        info('Installing {0} configuration file'.format(config['name']))
-        src_cfgfile = '{0}/config/root.cfg.j2'.format(appdir)
-        cfgfile = '{0}/cfg/{1}-root.cfg'.format(config['basedir'], config['name'])
-        if not os.path.exists(src_cfgfile):
-            error('{0} does not exist'.format(src_cfgfile))
-        src_cfg = open(src_cfgfile, 'r').read()
-        template = jinja2.Template(src_cfg)
-        cfgfile_data = template.render(config)
-        open(cfgfile, 'w').write(cfgfile_data)
-
-        info('Setup CA directories'.format(config['name']))
-        ca_dir = '{0}/ca'.format(config['basedir'])
-        if os.path.exists(ca_dir):
-            error('{0} already exists'.format(ca_dir))
-        os.mkdir(ca_dir)
-        os.mkdir('{0}/certs'.format(ca_dir))
-        os.mkdir('{0}/private'.format(ca_dir))
-        os.mkdir('{0}/db'.format(ca_dir))
-        os.mkdir('{0}/certs'.format(config['basedir']))
-        os.mkdir('{0}/private'.format(config['basedir']))
-        os.mkdir('{0}/db'.format(config['basedir']))
-
-        info('Initialize {{name}}-root database')
-        db_dir = '{0}/ca/db'.format(config['basedir'])
-        db = '{0}/{1}-root.db'.format(db_dir, config['name'])
-        db_attr = '{0}.attr'.format(db)
-        db_serial = '{0}/ca/db/{{1}}.crt.srl'.format()
+        root = openssl.RootCA(config, 'as65342-root')
+        root.setup()
+        root.initca()
+        root.updatecrl()
