@@ -125,6 +125,13 @@ class CA(Parent):
         proc = self.run(cmdline)
         proc.communicate()
 
+    def autosign(self, csr, crt):
+        info('Signing certificate using {0} CA'.format(self.ca['name']))
+        cmdline = 'openssl ca -config {0} -in {1} -out {2} -extensions server_ext'.format(self.ca['cfg'], csr, crt)
+        os.chdir(self.ca['basedir'])
+
+        proc = self.run(cmdline, stdin=True)
+        proc.communicate(input=b'y\ny\n')
 
 class RootCA(CA):
     ca_type = CA_ROOT

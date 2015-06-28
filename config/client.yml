@@ -1,0 +1,6 @@
+---
+# This file contains the configuration for a certificate client
+
+api:
+    basedir: /people/r3boot/git/pki/workspace
+    url: http://localhost:4392/autosign

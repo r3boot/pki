@@ -1,0 +1,34 @@
+#!/usr/bin/env python2
+
+import os
+import sys
+import yaml
+
+sys.path.append('.')
+
+from pki.logging    import *
+from pki            import jsoncfg
+from pki            import apiclient
+
+__appname__ = 'AS65342 pki certificate generator'
+__version__ = 0.1
+
+
+if __name__ == '__main__':
+    appdir = os.path.dirname(os.path.abspath(sys.argv[0]))
+    appdir = os.path.dirname(appdir)
+    cfg_file = '{0}/config/client.yml'.format(appdir)
+    os.umask(022)
+
+    if len(sys.argv) != 2:
+        error('Need a fqdn for the CN')
+    fqdn = sys.argv[1]
+
+    if not os.path.exists(cfg_file):
+        error('Cannot find {0}'.format(cfg_file))
+    raw_cfg = open(cfg_file, 'r').read()
+    config = yaml.load(raw_cfg)
+    config['appdir'] = appdir
+
+    autosign = apiclient.APIClient(config)
+    autosign.new_server_cert(fqdn)
