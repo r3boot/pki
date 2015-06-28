@@ -38,7 +38,11 @@ commonName              = "{{cn}}"
 
 [ ca_reqext ]
 keyUsage                = critical,keyCertSign,cRLSign
+{% if ca_type == 'autosign' %}
+basicConstraints        = critical,CA:true,pathlen:0
+{% else %}
 basicConstraints        = critical,CA:true
+{% endif %}
 subjectKeyIdentifier    = hash
 
 # CA operational settings
@@ -61,7 +65,11 @@ email_in_dn             = no                    # Add email to cert DN
 preserve                = no                    # Keep passed DN ordering
 name_opt                = $name_opt             # Subject DN display options
 cert_opt                = ca_default            # Certificate display options
+{% if ca_type == "autosign" %}
+copy_extensions         = copy # Copy extensions from CSR
+{% else %}
 copy_extensions         = none                  # Copy extensions from CSR
+{% endif %}
 {% if ca_type == "root" %}
 x509_extensions         = intermediate_ca_ext   # Default cert extensions
 default_crl_days        = 30                    # How long before next CRL

@@ -1,4 +1,5 @@
 
+import jinja2
 import json
 import os
 import requests
@@ -34,8 +35,10 @@ class APIClient(Parent):
         except requests.exceptions.ConnectionError, e:
             error(e)
         finally:
-            if r and r.status_code == 200:
-                response = r.content
+            if not r:
+                response = {'result': False, 'content': 'Unknown error'}
+            elif r.status_code == 200:
+                response = {'result': True, 'content': r.content}
 
         return response
 
@@ -49,15 +52,20 @@ class APIClient(Parent):
         return self._request('delete', path, payload)
 
     def new_server_cert(self, fqdn):
+        san = fqdn.split('.')[0]
         path = '/servers'
         key = '{0}/private/{1}.key'.format(self._cfg['api']['basedir'], fqdn)
+        cfg = '{0}/cfg/{1}.cfg'.format(self._cfg['api']['basedir'], fqdn)
         csr = '{0}/csr/{1}.csr'.format(self._cfg['api']['basedir'], fqdn)
         crt = '{0}/certs/{1}.pem'.format(self._cfg['api']['basedir'], fqdn)
 
-        os.environ['CN'] = fqdn
-        cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
-            '{0}/as65342-servers-autosign/cfg/as65342-servers-autosign.cfg'.format(self._cfg['api']['basedir']), csr, key)
-        print(cmdline)
+        template_file = '{0}/templates/tls-server-request.cfg.j2'.format(self._cfg['appdir'])
+        template_data = open(template_file, 'r').read()
+        template = jinja2.Template(template_data)
+        cfg_data = template.render(fqdn=fqdn, san=san, certs=self._cfg['certs'])
+        open(cfg, 'w').write(cfg_data)
+
+        cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format('{0}/cfg/{1}.cfg'.format(self._cfg['api']['basedir'], fqdn), csr, key)
         proc = self.run(cmdline)
         proc.communicate()
 
@@ -65,7 +73,11 @@ class APIClient(Parent):
         payload = {
             'fqdn': fqdn,
             'csr': csr_data,
+            'token': self._cfg['api']['token'],
         }
-        certificate = self.post(path, payload=payload)
+        response = self.post(path, payload=payload)
+        if not response['result']:
+            error('Failed to retrieve a certificate: {0}'.format(response['content']))
+
         print("writing new certificate to '{0}'".format(crt))
-        open(crt, 'w').write(certificate)
+        open(crt, 'w').write(response['content'])

@@ -4,3 +4,13 @@
 api:
     basedir: /people/r3boot/git/pki/workspace
     url: http://localhost:4392/autosign
+    token: 84ca4d55efff9dd12453b28a7f11e9a83e1bb5260b146712659c083d321d0278
+
+certs:
+    bits: 4096
+    hash: sha512
+    country: NL
+    province: Utrecht
+    city: Amersfoort
+    organization: AS65342
+    unit: Autosign

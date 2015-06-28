@@ -27,4 +27,4 @@ intermediary:
 autosign:
     - name: servers
       cn: AS65342 Server CA
-      unit: Autosign CA
+      unit: Autosign
