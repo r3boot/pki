@@ -8,6 +8,8 @@ from pki.logging    import *
 from pki.parent     import *
 
 CA_ROOT = 'root'
+CA_INTERMEDIARY = 'intermediary'
+CA_AUTOSIGN = 'autosign'
 
 """
 - One object per CA
@@ -23,15 +25,17 @@ class CA(Parent):
 
         if not self.ca_type:
             error('ca_type not defined')
-        if not os.path.exists(self.cfg['ca']['basedir']):
-            error('{0} does not exist'.format(self.cfg['ca']['basedir']))
+        if not os.path.exists(self.cfg['common']['basedir']):
+            error('{0} does not exist'.format(self.cfg['common']['basedir']))
 
-        name = '{0}-{1}'.format(self.cfg['ca']['name'], self.ca_type)
-        basedir = '{0}/{1}'.format(self.cfg['ca']['basedir'], name)
+        if not name:
+            name = '{0}-{1}'.format(self.cfg['common']['name'], self.ca_type)
+        basedir = '{0}/{1}'.format(self.cfg['common']['basedir'], name)
         self.ca = {
             'name': name,
+            'type': self.ca_type,
             'basedir': basedir,
-            'baseurl': '{0}/{1}'.format(self.cfg['ca']['baseurl'], name),
+            'baseurl': self.cfg['common']['baseurl'],
             'cfg': '{0}/cfg/{1}.cfg'.format(basedir, name),
             'csr': '{0}/csr/{1}.csr'.format(basedir, name),
             'crl': '{0}/crl/{1}.crl'.format(basedir, name),
@@ -46,7 +50,11 @@ class CA(Parent):
         self.name = name
         self.ca_directories = ['certs', 'cfg', 'crl', 'csr', 'db', 'private']
 
-    def setup(self):
+    def gen_enddate(self):
+        return time.strftime('%Y%m%d%H%M%SZ', time.localtime(time.time() + self.ca['days']))
+
+    def setup(self, ca_data={}):
+        print('\n')
         info('Setup directories for {0} CA'.format(self.ca['name']))
 
         if os.path.exists(self.ca['basedir']):
@@ -59,6 +67,7 @@ class CA(Parent):
                 info('Creating {0}/{1}'.format(self.ca['name'], directory))
                 os.mkdir(fdir)
 
+        print('\n')
         info('Initialize databases for {0} CA'.format(self.ca['name']))
         for empty_file in [self.ca['db'], self.ca['db_attr']]:
             open(empty_file, 'w').write('')
@@ -66,6 +75,7 @@ class CA(Parent):
         for serial_file in [self.ca['crt_idx'], self.ca['crl_idx']]:
             open(serial_file, 'w').write('01\n')
 
+        print('\n')
         info('Installing openssl configuration file for {0} CA'.format(self.ca['name']))
         src_template = '{0}/templates/root.cfg.j2'.format(self.cfg['appdir'])
         cfgfile = '{0}/cfg/{1}.cfg'.format(self.ca['basedir'], self.ca['name'])
@@ -73,14 +83,20 @@ class CA(Parent):
             error('{0} does not exist'.format(src_template))
 
         cfg = {}
-        cfg['name'] = self.name
-        for k,v in self.cfg[self.ca_type].items():
-            cfg[k] = v
         for k,v in self.cfg['common'].items():
             cfg[k] = v
+        if self.ca_type in [CA_AUTOSIGN]:
+            for k,v in ca_data.items():
+                cfg[k] = v
+        else:
+            for k,v in self.cfg[self.ca_type].items():
+                cfg[k] = v
+
         cfg['crypto'] = self.cfg['crypto']
-        cfg['basedir'] = self.cfg['ca']['basedir']
+        cfg['basedir'] = self.cfg['common']['basedir']
         cfg['appdir'] = self.cfg['appdir']
+        cfg['ca_type'] = self.ca_type
+        cfg['name'] = self.name
 
         template_data = open(src_template, 'r').read()
         template = jinja2.Template(template_data)
@@ -94,8 +110,17 @@ class CA(Parent):
         cfg = '{0}/cfg/{1}.cfg'.format(self.ca['basedir'], self.ca['name'])
         crl = '{0}/crl/{1}.crl'.format(self.ca['basedir'], self.ca['name'])
 
+        print('\n')
         info('Generating crl for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl ca -gencrl -config {0} -out {1}'.format(self.ca['cfg'], self.ca['crl'])
+        os.chdir(self.ca['basedir'])
+        proc = self.run(cmdline)
+        proc.communicate()
+
+    def sign_intermediary(self, csr, crt):
+        print('\n')
+        info('Signing certificate using {0} CA'.format(self.ca['name']))
+        cmdline = 'openssl ca -config {0} -in {1} -out {2} -extensions intermediate_ca_ext -enddate {3}'.format(self.ca['cfg'], csr, crt, self.gen_enddate())
         os.chdir(self.ca['basedir'])
         proc = self.run(cmdline)
         proc.communicate()
@@ -104,12 +129,11 @@ class CA(Parent):
 class RootCA(CA):
     ca_type = CA_ROOT
 
-    def __init__(self, config, name=None):
-        CA.__init__(self, config, name)
+    def __init__(self, config):
+        CA.__init__(self, config)
 
     def initca(self):
-        enddate = time.strftime('%Y%m%d%H%M%SZ', time.localtime(time.time() + self.ca['days']))
-
+        print('\n')
         info('Generating key and csr for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
             self.ca['cfg'], self.ca['csr'], self.ca['key'])
@@ -117,8 +141,55 @@ class RootCA(CA):
         proc = self.run(cmdline)
         proc.communicate()
 
+        print('\n')
         info('Generating certificate for {0} CA'.format(self.ca['name']))
-        cmdline = 'openssl ca -selfsign -config {0} -in {1} -out {2} -extensions root_ca_ext -enddate {3}'.format(self.ca['cfg'], self.ca['csr'], self.ca['crt'], enddate)
+        cmdline = 'openssl ca -selfsign -config {0} -in {1} -out {2} -extensions root_ca_ext -enddate {3}'.format(self.ca['cfg'], self.ca['csr'], self.ca['crt'], self.gen_enddate())
         os.chdir(self.ca['basedir'])
         proc = self.run(cmdline)
         proc.communicate()
+
+
+class IntermediaryCA(CA):
+    ca_type = CA_INTERMEDIARY
+
+    def __init__(self, config):
+        CA.__init__(self, config)
+
+    def initca(self, parent=None):
+        if not parent:
+            error('initca needs a parent CA')
+        print('\n')
+        info('Generating key and csr for {0} CA'.format(self.ca['name']))
+        cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
+            self.ca['cfg'], self.ca['csr'], self.ca['key'])
+        os.chdir(self.ca['basedir'])
+        proc = self.run(cmdline)
+        proc.communicate()
+
+        print('\n')
+        info('Generating certificate for {0} CA'.format(self.ca['name']))
+        parent.sign_intermediary(self.ca['csr'], self.ca['crt'])
+
+
+class AutosignCA(CA):
+    ca_type = CA_AUTOSIGN
+
+    def __init__(self, config, name=None):
+        if not name:
+            error('No name supplied to class')
+        CA.__init__(self, config, name=name)
+
+    def initca(self, parent=None):
+        if not parent:
+            error('initca needs a parent CA')
+        print('\n')
+        info('Generating key and csr for {0} CA'.format(self.ca['name']))
+        cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
+            self.ca['cfg'], self.ca['csr'], self.ca['key'])
+        os.chdir(self.ca['basedir'])
+        proc = self.run(cmdline)
+        proc.communicate()
+
+        print('\n')
+        info('Generating certificate for {0} CA'.format(self.ca['name']))
+        parent.sign_intermediary(self.ca['csr'], self.ca['crt'])

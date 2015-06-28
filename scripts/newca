@@ -1,0 +1,55 @@
+#!/usr/bin/env python2
+
+import os
+import sys
+import jinja2
+import yaml
+
+sys.path.append('.')
+
+from pki.logging    import *
+from pki            import jsoncfg
+from pki            import openssl
+
+__appname__ = 'AS65342 pki'
+__version__ = 0.1
+
+valid_operations = [
+    'initca',
+]
+
+
+if __name__ == '__main__':
+    appdir = os.path.dirname(os.path.abspath(sys.argv[0]))
+    appdir = os.path.dirname(appdir)
+    cfg_file = cfg_file = '{0}/config/pki.yml'.format(appdir)
+    os.umask(022)
+
+    # Reopen stdout and stderr as unbuffered
+    sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
+    sys.stderr = os.fdopen(sys.stderr.fileno(), 'w', 0)
+
+    if not os.path.exists(cfg_file):
+        error('Cannot find {0}'.format(cfg_file))
+    raw_cfg = open(cfg_file, 'r').read()
+    config = yaml.load(raw_cfg)
+    config['appdir'] = appdir
+
+    root = openssl.RootCA(config)
+    root.setup()
+    root.initca()
+    root.updatecrl()
+
+    intermediary = openssl.IntermediaryCA(config)
+    intermediary.setup()
+    intermediary.initca(parent=root)
+    intermediary.updatecrl()
+
+    autosign_cas = {}
+    for ca in config['autosign']:
+        name = '{0}-{1}-autosign'.format(config['common']['name'], ca['name'])
+        autosign_cas[name] = openssl.AutosignCA(config, name=name)
+        autosign_cas[name].setup(ca_data=ca)
+        autosign_cas[name].initca(parent=intermediary)
+        autosign_cas[name].updatecrl()
+

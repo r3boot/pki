@@ -1,0 +1,29 @@
+---
+# This file contains the configuration for the AS65342 pki scripting
+# infrastructure
+
+common:
+    name: as65342
+    basedir: /people/r3boot/git/pki/workspace
+    baseurl: http://pki.as65342.net
+    country: NL
+    province: Utrecht
+    city: Amersfoort
+    organization: AS65342
+    unit: PKI services
+
+crypto:
+    algo: rsa
+    bits: 4096
+    hash: sha512
+
+root:
+    cn: AS65342 Root CA
+
+intermediary:
+    cn: AS65342 Intermediary CA
+
+autosign:
+    - name: servers
+      cn: AS65342 Server CA
+      unit: Autosign CA
