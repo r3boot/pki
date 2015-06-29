@@ -66,8 +66,7 @@ if __name__ == '__main__':
     config = yaml.safe_load(raw_cfg)
 
     ## Override configured workspace if needed
-    if args.workspace:
-        config['common']['workspace'] = args.workspace
+    config['common']['workspace'] = os.path.abspath(args.workspace)
 
     ## Check if workspace directory exists
     if not os.path.exists(config['common']['workspace']):

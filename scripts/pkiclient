@@ -56,9 +56,10 @@ if __name__ == '__main__':
     old_umask = os.umask(027)
 
     ## Check if workspace directory exists
-    if not os.path.exists(args.workspace):
-        warning('Creating {0}'.format(args.workspace))
-        os.mkdir(args.workspace)
+    workspace = os.path.abspath(args.workspace)
+    if not os.path.exists(workspace):
+        warning('Creating {0}'.format(workspace))
+        os.mkdir(workspace)
 
     if not os.path.exists(args.cfgfile):
         if not args.url:
@@ -104,12 +105,12 @@ if __name__ == '__main__':
     config = yaml.safe_load(raw_cfg)
 
     ## Set workspace and x509 directory
-    config['workspace'] = args.workspace
+    config['workspace'] = workspace
     config['x509'] = args.x509
 
     ## All green, proceed with the program
     debug('Using configuration from {0}'.format(args.cfgfile))
-    debug('Using {0} as the workspace'.format(args.workspace))
+    debug('Using {0} as the workspace'.format(workspace))
     debug('Using {0} as the x509 store'.format(args.x509))
 
     autosign = apiclient.APIClient(config)
