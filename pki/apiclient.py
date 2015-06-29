@@ -54,10 +54,10 @@ class APIClient(Parent):
     def new_server_cert(self, fqdn):
         san = fqdn.split('.')[0]
         path = '/servers'
-        key = '{0}/private/{1}.key'.format(self._cfg['api']['basedir'], fqdn)
-        cfg = '{0}/cfg/{1}.cfg'.format(self._cfg['api']['basedir'], fqdn)
-        csr = '{0}/csr/{1}.csr'.format(self._cfg['api']['basedir'], fqdn)
-        crt = '{0}/certs/{1}.pem'.format(self._cfg['api']['basedir'], fqdn)
+        key = '{0}/private/{1}.key'.format(self._cfg['basedir'], fqdn)
+        cfg = '{0}/cfg/{1}.cfg'.format(self._cfg['basedir'], fqdn)
+        csr = '{0}/csr/{1}.csr'.format(self._cfg['basedir'], fqdn)
+        crt = '{0}/certs/{1}.pem'.format(self._cfg['basedir'], fqdn)
 
         template_file = '{0}/templates/tls-server-request.cfg.j2'.format(self._cfg['appdir'])
         template_data = open(template_file, 'r').read()
@@ -65,10 +65,12 @@ class APIClient(Parent):
         cfg_data = template.render(fqdn=fqdn, san=san, certs=self._cfg['certs'])
         open(cfg, 'w').write(cfg_data)
 
-        cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format('{0}/cfg/{1}.cfg'.format(self._cfg['api']['basedir'], fqdn), csr, key)
+        info('Generating key and csr for {0}'.format(fqdn))
+        cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format('{0}/cfg/{1}.cfg'.format(self._cfg['basedir'], fqdn), csr, key)
         proc = self.run(cmdline)
         proc.communicate()
 
+        info('Sending csr to {0}'.format(self._cfg['api']['url']))
         csr_data = open(csr, 'r').read()
         payload = {
             'fqdn': fqdn,
@@ -79,5 +81,5 @@ class APIClient(Parent):
         if not response['result']:
             error('Failed to retrieve a certificate: {0}'.format(response['content']))
 
-        print("writing new certificate to '{0}'".format(crt))
+        info('Got certificate for {0}'.format(fqdn))
         open(crt, 'w').write(response['content'])

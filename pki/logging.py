@@ -1,6 +1,12 @@
 import sys
 import pprint
 
+enable_debug = False
+
+def setup_logging(do_debug):
+    global enable_debug
+    enable_debug = do_debug
+
 def print_message(prefix, message):
     print('{0} {1}'.format(prefix, message))
 
@@ -15,6 +21,8 @@ def error(message):
     sys.exit(1)
 
 def debug(message):
+    if not enable_debug:
+        return
     print_message('[D]', message)
 
 def dump(obj):

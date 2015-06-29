@@ -4,7 +4,7 @@
 
 common:
     name: as65342
-    basedir: /people/r3boot/git/pki/workspace
+    workspace: /etc/pki
     baseurl: http://pki.as65342.net
     oscpurl: http://oscp.as65342.net
     country: NL

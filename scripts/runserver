@@ -27,6 +27,7 @@ if __name__ == '__main__':
     raw_cfg = open(cfg_file, 'r').read()
     config = yaml.load(raw_cfg)
     config['appdir'] = appdir
+    config['basedir'] = '{0}/workspace/as65342-servers-autosign'.format(appdir)
 
     service.ca = openssl.AutosignCA(config, name='as65342-servers-autosign')
     service.config = config

@@ -5,10 +5,17 @@ import subprocess
 from pki.logging    import *
 
 class Parent:
-    def run(self, cmd, stdin=None):
+    def run(self, cmd, stdin=False, stdout=False):
         cmd = shlex.split(cmd)
-        if stdin:
-            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+
+        if stdout:
+            if stdin:
+                proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+            else:
+                proc = subprocess.Popen(cmd)
         else:
-            proc = subprocess.Popen(cmd)
+            if stdin:
+                proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            else:
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         return proc

@@ -29,6 +29,18 @@ if __name__ == '__main__':
     raw_cfg = open(cfg_file, 'r').read()
     config = yaml.load(raw_cfg)
     config['appdir'] = appdir
+    config['basedir'] = '{0}/workspace'.format(appdir)
+
+    if not os.path.exists(config['basedir']):
+        warning('{0} does not exist, creating'.format(config['basedir']))
+        os.mkdir(config['basedir'])
+
+    req_dirs = ['certs', 'cfg', 'crl', 'csr', 'private']
+    for directory in req_dirs:
+        full_dir = '{0}/{1}'.format(config['basedir'], directory)
+        if not os.path.exists(full_dir):
+            warning('Creating {0}'.format(full_dir))
+            os.mkdir(full_dir)
 
     autosign = apiclient.APIClient(config)
     autosign.new_server_cert(fqdn)

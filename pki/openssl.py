@@ -22,18 +22,22 @@ class CA(Parent):
 
     def __init__(self, config, name=None, days=3652):
         self.cfg = config
+        if not name:
+            name = '{0}-{1}'.format(self.cfg['common']['name'], self.ca_type)
+
+        basedir= '{0}/{1}'.format(self.cfg['common']['workspace'], name)
 
         if not self.ca_type:
             error('ca_type not defined')
-        if not os.path.exists(self.cfg['common']['basedir']):
-            error('{0} does not exist'.format(self.cfg['common']['basedir']))
 
-        if not name:
-            name = '{0}-{1}'.format(self.cfg['common']['name'], self.ca_type)
-        basedir = '{0}/{1}'.format(self.cfg['common']['basedir'], name)
+        if not os.path.exists(basedir):
+            warning('{0} does not exist'.format(basedir))
+            os.mkdir(basedir)
+
         self.ca = {
             'name': name,
             'type': self.ca_type,
+            'workspace': self.cfg['common']['workspace'],
             'basedir': basedir,
             'baseurl': self.cfg['common']['baseurl'],
             'cfg': '{0}/cfg/{1}.cfg'.format(basedir, name),
@@ -85,6 +89,7 @@ class CA(Parent):
         cfg = {}
         for k,v in self.cfg['common'].items():
             cfg[k] = v
+
         if self.ca_type in [CA_AUTOSIGN]:
             for k,v in ca_data.items():
                 cfg[k] = v
@@ -113,22 +118,19 @@ class CA(Parent):
         print('\n')
         info('Generating crl for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl ca -gencrl -config {0} -out {1}'.format(self.ca['cfg'], self.ca['crl'])
-        os.chdir(self.ca['basedir'])
-        proc = self.run(cmdline)
+        proc = self.run(cmdline, stdout=True)
         proc.communicate()
 
     def sign_intermediary(self, csr, crt):
         print('\n')
         info('Signing certificate using {0} CA'.format(self.ca['name']))
         cmdline = 'openssl ca -config {0} -in {1} -out {2} -extensions intermediate_ca_ext -enddate {3}'.format(self.ca['cfg'], csr, crt, self.gen_enddate())
-        os.chdir(self.ca['basedir'])
-        proc = self.run(cmdline)
+        proc = self.run(cmdline, stdout=True)
         proc.communicate()
 
     def autosign(self, csr, crt):
         info('Signing certificate using {0} CA'.format(self.ca['name']))
         cmdline = 'openssl ca -config {0} -in {1} -out {2} -extensions server_ext'.format(self.ca['cfg'], csr, crt)
-        os.chdir(self.ca['basedir'])
 
         proc = self.run(cmdline, stdin=True)
         proc.communicate(input=b'y\ny\n')
@@ -144,15 +146,13 @@ class RootCA(CA):
         info('Generating key and csr for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
             self.ca['cfg'], self.ca['csr'], self.ca['key'])
-        os.chdir(self.ca['basedir'])
-        proc = self.run(cmdline)
+        proc = self.run(cmdline, stdout=True)
         proc.communicate()
 
         print('\n')
         info('Generating certificate for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl ca -selfsign -config {0} -in {1} -out {2} -extensions root_ca_ext -enddate {3}'.format(self.ca['cfg'], self.ca['csr'], self.ca['crt'], self.gen_enddate())
-        os.chdir(self.ca['basedir'])
-        proc = self.run(cmdline)
+        proc = self.run(cmdline, stdout=True)
         proc.communicate()
 
 
@@ -169,8 +169,7 @@ class IntermediaryCA(CA):
         info('Generating key and csr for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
             self.ca['cfg'], self.ca['csr'], self.ca['key'])
-        os.chdir(self.ca['basedir'])
-        proc = self.run(cmdline)
+        proc = self.run(cmdline, stdout=True)
         proc.communicate()
 
         print('\n')
@@ -193,8 +192,7 @@ class AutosignCA(CA):
         info('Generating key and csr for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
             self.ca['cfg'], self.ca['csr'], self.ca['key'])
-        os.chdir(self.ca['basedir'])
-        proc = self.run(cmdline)
+        proc = self.run(cmdline, stdout=True)
         proc.communicate()
 
         print('\n')

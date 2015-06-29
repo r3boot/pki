@@ -4,7 +4,7 @@
 api:
     basedir: /people/r3boot/git/pki/workspace
     url: http://localhost:4392/autosign
-    token: 84ca4d55efff9dd12453b28a7f11e9a83e1bb5260b146712659c083d321d0278
+    token: fc31cac6af19bf001816060cdb6f9070240dcc19387f944a85545806e76a815b
 
 certs:
     bits: 4096
