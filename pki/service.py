@@ -1,6 +1,8 @@
 
 from Crypto.Hash    import SHA256
+
 import bottle
+import jinja2
 import json
 import os
 import random
@@ -8,7 +10,9 @@ import shlex
 import socket
 import subprocess
 
-from pki.logging    import *
+from pki.logging            import *
+from pki.utils              import *
+from pki.validator.client   import ValidatorClient
 
 ca =  None
 
@@ -27,7 +31,7 @@ def validate_fqdn(srcip, fqdn):
         return True
 
 def validate_token(fqdn, token):
-    token_store = '{0}/tokens.json'.format(ca.ca['basedir'])
+    token_store = '{0}/tokens.json'.format(ca.ca['workspace'])
     if not os.path.exists(token_store):
         warning('{0} does not exist'.format(token_store))
         return False
@@ -62,27 +66,41 @@ def validate_csr(srcip, csr):
 def index():
     return 'PKI api service\n'
 
-@bottle.get('/test/<fqdn>')
-def test_fqdn(fqdn):
-    if validate_fqdn(bottle.request.remote_addr, fqdn):
-        return 'ok'
-    else:
+
+@bottle.post('/token/<fqdn>')
+def generate_token(fqdn):
+    raw_data = bottle.request.body.read()
+    data = json.loads(raw_data)
+
+    template_file = '{0}/templates/client.yml.j2'.format(ca.cfg['common']['workspace'])
+    if not os.path.exists(template_file):
+        warning('{0} does not exist'.format(template_file))
+        return bottle.HTTPResponse(status=501, body='Internal error')
+
+    debug('Received new token request from {0}'.format(fqdn))
+    req_token = data['token']
+    if not ValidatorClient(fqdn).validate(req_token=req_token):
+        warning('{0} initial token mismatch'.format(fqdn))
         return bottle.HTTPResponse(status=403, body='Not authenticated')
 
-@bottle.get('/token/<fqdn>')
-def generate_token(fqdn):
-    token_store = '{0}/tokens.json'.format(ca.cfg['basedir'])
-    seed = random.random()
-    raw_token = '{0}{1}'.format(seed, fqdn)
-    sha = SHA256.new()
-    sha.update(raw_token)
-    token = sha.hexdigest()
+    token = gentoken()
+
+    token_store = '{0}/tokens.json'.format(ca.cfg['common']['workspace'])
     tokens = {}
     if os.path.exists(token_store):
         tokens = json.loads(open(token_store, 'r').read())
     tokens[fqdn] = token
     open(token_store, 'w').write(json.dumps(tokens))
-    return '{0}\n'.format(token)
+
+    template_data = open(template_file, 'r').read()
+    template = jinja2.Template(template_data)
+    cfg_data = template.render(
+        server_host='127.0.0.1',
+        server_port=4392,
+        client_token=token,
+    )
+    return cfg_data
+
 
 @bottle.post('/autosign/servers')
 def sign_servers_cert():
@@ -92,7 +110,7 @@ def sign_servers_cert():
     if not validate_fqdn(bottle.request.remote_addr, data['fqdn']):
         return bottle.HTTPResponse(status=403)
 
-    if not validate_token(data['fqdn'], data['token']):
+    if not validate_token(data['hostname'], data['token']):
         return bottle.HTTPResponse(status=403)
 
     csr = '{0}/csr/{1}.csr'.format(ca.ca['basedir'], data['fqdn'])

@@ -25,14 +25,10 @@ class CA(Parent):
         if not name:
             name = '{0}-{1}'.format(self.cfg['common']['name'], self.ca_type)
 
-        basedir= '{0}/{1}'.format(self.cfg['common']['workspace'], name)
+        basedir = os.path.abspath('{0}/{1}'.format(self.cfg['common']['workspace'], name))
 
         if not self.ca_type:
             error('ca_type not defined')
-
-        if not os.path.exists(basedir):
-            warning('{0} does not exist'.format(basedir))
-            os.mkdir(basedir)
 
         self.ca = {
             'name': name,
@@ -40,16 +36,16 @@ class CA(Parent):
             'workspace': self.cfg['common']['workspace'],
             'basedir': basedir,
             'baseurl': self.cfg['common']['baseurl'],
-            'cfg': '{0}/cfg/{1}.cfg'.format(basedir, name),
-            'csr': '{0}/csr/{1}.csr'.format(basedir, name),
-            'crl': '{0}/crl/{1}.crl'.format(basedir, name),
-            'key': '{0}/private/{1}.key'.format(basedir, name),
-            'crt': '{0}/certs/{1}.pem'.format(basedir, name),
+            'cfg': '{0}/cfg/{1}.cfg'.format(self.ca['basedir'], name),
+            'csr': '{0}/csr/{1}.csr'.format(self.ca['basedir'], name),
+            'crl': '{0}/crl/{1}.crl'.format(self.ca['basedir'], name),
+            'key': '{0}/private/{1}.key'.format(self.ca['basedir'], name),
+            'crt': '{0}/certs/{1}.pem'.format(self.ca['basedir'], name),
             'days': 60*60*24*days,
-            'db': '{0}/db/{1}.db'.format(basedir, name),
-            'db_attr': '{0}/db/{1}.db.attr'.format(basedir, name),
-            'crt_idx': '{0}/db/{1}-crt.idx'.format(basedir, name),
-            'crl_idx': '{0}/db/{1}-crl.idx'.format(basedir, name),
+            'db': '{0}/db/{1}.db'.format(self.ca['basedir'], name),
+            'db_attr': '{0}/db/{1}.db.attr'.format(self.ca['basedir'], name),
+            'crt_idx': '{0}/db/{1}-crt.idx'.format(self.ca['basedir'], name),
+            'crl_idx': '{0}/db/{1}-crl.idx'.format(self.ca['basedir'], name),
         }
         self.name = name
         self.ca_directories = ['certs', 'cfg', 'crl', 'csr', 'db', 'private']
@@ -60,6 +56,8 @@ class CA(Parent):
     def setup(self, ca_data={}):
         print('\n')
         info('Setup directories for {0} CA'.format(self.ca['name']))
+        dump(self.ca)
+        dump(self.cfg)
 
         if os.path.exists(self.ca['basedir']):
             error('{0} already exists'.format(self.ca['basedir']))
@@ -81,7 +79,7 @@ class CA(Parent):
 
         print('\n')
         info('Installing openssl configuration file for {0} CA'.format(self.ca['name']))
-        src_template = '{0}/templates/root.cfg.j2'.format(self.cfg['appdir'])
+        src_template = '{0}/templates/root.cfg.j2'.format(self.ca['workspace'])
         cfgfile = '{0}/cfg/{1}.cfg'.format(self.ca['basedir'], self.ca['name'])
         if not os.path.exists(src_template):
             error('{0} does not exist'.format(src_template))
@@ -97,9 +95,9 @@ class CA(Parent):
             for k,v in self.cfg[self.ca_type].items():
                 cfg[k] = v
 
+
         cfg['crypto'] = self.cfg['crypto']
-        cfg['basedir'] = self.cfg['common']['basedir']
-        cfg['appdir'] = self.cfg['appdir']
+        cfg['basedir'] = '{0}/{1}'.format(self.ca['workspace'], self.name)
         cfg['ca_type'] = self.ca_type
         cfg['name'] = self.name
 
@@ -118,6 +116,7 @@ class CA(Parent):
         print('\n')
         info('Generating crl for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl ca -gencrl -config {0} -out {1}'.format(self.ca['cfg'], self.ca['crl'])
+        os.chdir(self.ca['basedir'])
         proc = self.run(cmdline, stdout=True)
         proc.communicate()
 
@@ -125,13 +124,14 @@ class CA(Parent):
         print('\n')
         info('Signing certificate using {0} CA'.format(self.ca['name']))
         cmdline = 'openssl ca -config {0} -in {1} -out {2} -extensions intermediate_ca_ext -enddate {3}'.format(self.ca['cfg'], csr, crt, self.gen_enddate())
+        os.chdir(self.ca['basedir'])
         proc = self.run(cmdline, stdout=True)
         proc.communicate()
 
     def autosign(self, csr, crt):
         info('Signing certificate using {0} CA'.format(self.ca['name']))
         cmdline = 'openssl ca -config {0} -in {1} -out {2} -extensions server_ext'.format(self.ca['cfg'], csr, crt)
-
+        os.chdir(self.ca['basedir'])
         proc = self.run(cmdline, stdin=True)
         proc.communicate(input=b'y\ny\n')
 
@@ -146,12 +146,14 @@ class RootCA(CA):
         info('Generating key and csr for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
             self.ca['cfg'], self.ca['csr'], self.ca['key'])
+        os.chdir(self.ca['basedir'])
         proc = self.run(cmdline, stdout=True)
         proc.communicate()
 
         print('\n')
         info('Generating certificate for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl ca -selfsign -config {0} -in {1} -out {2} -extensions root_ca_ext -enddate {3}'.format(self.ca['cfg'], self.ca['csr'], self.ca['crt'], self.gen_enddate())
+        os.chdir(self.ca['basedir'])
         proc = self.run(cmdline, stdout=True)
         proc.communicate()
 
@@ -169,6 +171,7 @@ class IntermediaryCA(CA):
         info('Generating key and csr for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
             self.ca['cfg'], self.ca['csr'], self.ca['key'])
+        os.chdir(self.ca['basedir'])
         proc = self.run(cmdline, stdout=True)
         proc.communicate()
 
@@ -192,6 +195,7 @@ class AutosignCA(CA):
         info('Generating key and csr for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
             self.ca['cfg'], self.ca['csr'], self.ca['key'])
+        os.chdir(self.ca['basedir'])
         proc = self.run(cmdline, stdout=True)
         proc.communicate()
 

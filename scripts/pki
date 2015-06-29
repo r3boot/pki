@@ -69,7 +69,6 @@ if __name__ == '__main__':
     if args.workspace:
         config['common']['workspace'] = args.workspace
 
-
     ## Check if workspace directory exists
     if not os.path.exists(config['common']['workspace']):
         warning('Creating {0}'.format(config['common']['workspace']))
@@ -78,6 +77,24 @@ if __name__ == '__main__':
     if operation == 'serve':
         service.ca = openssl.AutosignCA(config, name='as65342-servers-autosign')
         service.run(host=args.host, port=args.port)
+    elif operation == 'init':
+        root = openssl.RootCA(config)
+        root.setup()
+        root.initca()
+        root.updatecrl()
+
+        intermediary = openssl.IntermediaryCA(config)
+        intermediary.setup()
+        intermediary.initca(parent=root)
+        intermediary.updatecrl()
+
+        autosign_cas = {}
+        for ca in config['autosign']:
+            name = '{0}-{1}-autosign'.format(config['common']['name'], ca['name'])
+            autosign_cas[name] = openssl.AutosignCA(config, name=name)
+            autosign_cas[name].setup(ca_data=ca)
+            autosign_cas[name].initca(parent=intermediary)
+            autosign_cas[name].updatecrl()
 
     ## Restore original umask
     os.umask(old_umask)

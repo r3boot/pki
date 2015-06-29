@@ -1,0 +1,18 @@
+CLIENT                                  SERVER
+-------------------------------------------------------------------------------
+1. Exit if configuration file is already
+   available on the filesystem
+2. Generate initial token
+3. Start local validation server
+4. Send new token request to pki server
+                                        4. Receive new token request from client
+                                        5. Validate DNS settings
+                                        6. Perform callback to client validation
+                                           server
+                                        7. Validate initial token
+                                        8. Generate new token
+                                        9. Update local token database
+                                        10. Generate config file
+                                        11. Send response containing config file
+12. Receive configuration file
+13. Write configuration file

@@ -1,0 +1,119 @@
+#!/usr/bin/env python2
+
+import argparse
+import os
+import socket
+import sys
+import time
+import yaml
+
+sys.path.append('.')
+
+from pki.logging    import *
+from pki.validation import *
+from pki.validator.service  import ValidatorAPI
+from pki            import apiclient
+
+__description__ = 'AS65342 PKI -- Client component'
+
+## Various default values used as CLI arguments
+_d_debug = False
+_d_url = 'http://127.0.0.1:4392'
+_d_cfgfile = '/etc/pki/client.yml'
+_d_workspace = '/etc/pki'
+_d_x509 = '/etc/ssl'
+
+if __name__ == '__main__':
+    ## Parse CLI arguments
+    parser = argparse.ArgumentParser(description=__description__)
+    parser.add_argument('-D', dest='debug', action='store_true',
+        default=_d_debug, help='Enable debugging')
+    parser.add_argument('-f', dest='cfgfile', action='store',
+        type=str, default=_d_cfgfile,
+        help='Configuration file to use ({0})'.format(_d_cfgfile))
+    parser.add_argument('-u', dest='url', action='store',
+        type=str, default=_d_url,
+        help='API URL to use (during initialization)')
+    parser.add_argument('-w', dest='workspace', action='store',
+        type=str, default=_d_workspace,
+        help='Override location where to store configuration(s)')
+    parser.add_argument('-o', dest='x509', action='store',
+        type=str, default=_d_x509,
+        help='Override location where to store x509 data')
+    parser.add_argument('fqdn', nargs=1, type=str,
+        help='Fully-Qualified Domain Name for the new x509 keypair')
+    args = parser.parse_args()
+
+    ## Setup logging
+    setup_logging(args.debug)
+
+    ## Exit if the fqdn does not match RFC1123
+    fqdn = args.fqdn[0]
+    if not valid_fqdn(fqdn):
+        error('{0} is not a valid fqdn'.format(fqdn))
+
+    ## Setup a restrictive umask
+    old_umask = os.umask(027)
+
+    ## Check if workspace directory exists
+    if not os.path.exists(args.workspace):
+        warning('Creating {0}'.format(args.workspace))
+        os.mkdir(args.workspace)
+
+    if not os.path.exists(args.cfgfile):
+        if not args.url:
+            error('Need a URL to connect to for initialization')
+
+        ## Request a new token if this is a first-time installation
+        info('No configuration found, requesting a new token and configuration')
+
+        ## Get the fqdn and prepare settings
+        hostname = socket.gethostname()
+        debug('Looked up hostname as {0}'.format(hostname))
+        host = socket.gethostbyname(hostname)
+        if host:
+            debug('Looked up ip as {0}'.format(host))
+        else:
+            error('Failed to lookup ptr record for {0}'.format(hostname))
+        port = 4393
+
+        ## Start the validator service
+        validator = ValidatorAPI(host=host, port=port)
+        info('Starting validator service')
+        validator.start()
+
+        ## Wait for validator service startup
+        time.sleep(0.5)
+
+        ## Receive a new tokenized configuration
+        validator.initialize_client(args.url, args.cfgfile, hostname)
+
+        info('Stoping validator service')
+        validator.stop()
+
+        ## Setup required directories
+        req_dirs = ['certs', 'cfg', 'crl', 'csr', 'private']
+        for directory in req_dirs:
+            full_dir = '{0}/{1}'.format(args.x509, directory)
+            if not os.path.exists(full_dir):
+                warning('Creating {0}'.format(full_dir))
+                os.mkdir(full_dir)
+
+    ## Load the configuration yaml
+    raw_cfg = open(args.cfgfile, 'r').read()
+    config = yaml.safe_load(raw_cfg)
+
+    ## Set workspace and x509 directory
+    config['workspace'] = args.workspace
+    config['x509'] = args.x509
+
+    ## All green, proceed with the program
+    debug('Using configuration from {0}'.format(args.cfgfile))
+    debug('Using {0} as the workspace'.format(args.workspace))
+    debug('Using {0} as the x509 store'.format(args.x509))
+
+    autosign = apiclient.APIClient(config)
+    autosign.new_server_cert(fqdn)
+
+    ## Restore original umask
+    os.umask(old_umask)

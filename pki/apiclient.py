@@ -1,8 +1,11 @@
 
+from Crypto.Hash    import SHA256
+
 import jinja2
 import json
 import os
 import requests
+import socket
 
 from pki.logging    import *
 from pki.parent     import Parent
@@ -51,22 +54,36 @@ class APIClient(Parent):
     def delete(self, path, payload={}):
         return self._request('delete', path, payload)
 
+    def initialize_client(self, fqdn, token):
+        path = '/token/{0}'.format(fqdn)
+        payload = {
+            'token': token,
+        }
+        info('Sending request for new token')
+        response = self.post(path, payload=payload)
+        if not response['result']:
+            error('Failed to retrieve a token: {0}'.format(response['content']))
+        debug('Received new token, writing configuration')
+        cfg_data = response['content']
+        cfg_file = '{0}/client.yml'.format(self._cfg['workspace'])
+        open(cfg_file, 'w').write('{0}\n'.format(cfg_data))
+
     def new_server_cert(self, fqdn):
         san = fqdn.split('.')[0]
-        path = '/servers'
-        key = '{0}/private/{1}.key'.format(self._cfg['basedir'], fqdn)
-        cfg = '{0}/cfg/{1}.cfg'.format(self._cfg['basedir'], fqdn)
-        csr = '{0}/csr/{1}.csr'.format(self._cfg['basedir'], fqdn)
-        crt = '{0}/certs/{1}.pem'.format(self._cfg['basedir'], fqdn)
+        path = '/autosign/servers'
+        key = '{0}/private/{1}.key'.format(self._cfg['x509'], fqdn)
+        cfg = '{0}/cfg/{1}.cfg'.format(self._cfg['x509'], fqdn)
+        csr = '{0}/csr/{1}.csr'.format(self._cfg['x509'], fqdn)
+        crt = '{0}/certs/{1}.pem'.format(self._cfg['x509'], fqdn)
 
-        template_file = '{0}/templates/tls-server-request.cfg.j2'.format(self._cfg['appdir'])
+        template_file = '{0}/templates/tls-server-request.cfg.j2'.format(self._cfg['workspace'])
         template_data = open(template_file, 'r').read()
         template = jinja2.Template(template_data)
         cfg_data = template.render(fqdn=fqdn, san=san, certs=self._cfg['certs'])
         open(cfg, 'w').write(cfg_data)
 
         info('Generating key and csr for {0}'.format(fqdn))
-        cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format('{0}/cfg/{1}.cfg'.format(self._cfg['basedir'], fqdn), csr, key)
+        cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format('{0}/cfg/{1}.cfg'.format(self._cfg['workspace'], fqdn), csr, key)
         proc = self.run(cmdline)
         proc.communicate()
 
@@ -74,6 +91,7 @@ class APIClient(Parent):
         csr_data = open(csr, 'r').read()
         payload = {
             'fqdn': fqdn,
+            'hostname': socket.gethostname(),
             'csr': csr_data,
             'token': self._cfg['api']['token'],
         }
