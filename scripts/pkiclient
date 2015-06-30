@@ -98,8 +98,10 @@ if __name__ == '__main__':
 
     ## Exit if the fqdn does not match RFC1123
     hostname = socket.gethostname()
+    is_vhost = False
     if args.vhost:
         fqdn = args.vhost
+        is_vhost = True
     else:
         fqdn = hostname
 
@@ -135,7 +137,7 @@ if __name__ == '__main__':
 
     autosign = apiclient.APIClient(config)
     if operation == 'newcert':
-        autosign.new_server_cert(fqdn)
+        autosign.new_server_cert(fqdn, vhost=is_vhost)
 
     ## Restore original umask
     os.umask(old_umask)

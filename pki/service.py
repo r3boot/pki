@@ -45,13 +45,17 @@ def validate_token(fqdn, token):
         warning('token mismatch for {0}'.format(fqdn))
         return False
 
-def validate_csr(srcip, csr):
-    try:
-        srchost = socket.gethostbyaddr(srcip)
-    except socket.error:
-        warning('Failed to find PTR record for {0}'.format(srcip))
-        return False
-    srchost = srchost[0]
+def validate_csr(srcip, csr, fqdn=None):
+    srchost = None
+    if fqdn:
+        srchost = fqdn
+    else:
+        try:
+            srchost = socket.gethostbyaddr(srcip)
+        except socket.error:
+            warning('Failed to find PTR record for {0}'.format(srcip))
+            return False
+        srchost = srchost[0]
 
     cmdline = 'openssl req -in {0} -noout -subject'.format(csr)
     cmd = shlex.split(cmdline)
@@ -116,7 +120,7 @@ def sign_servers_cert():
     csr = '{0}/csr/{1}.csr'.format(ca.ca['basedir'], data['fqdn'])
     open(csr, 'w').write('{0}\n'.format(data['csr']))
 
-    if not validate_csr(bottle.request.remote_addr, csr):
+    if not validate_csr(bottle.request.remote_addr, csr, fqdn=data['fqdn']):
         return bottle.HTTPResponse(status=403)
 
     crt = '{0}/certs/{1}.pem'.format(ca.ca['basedir'], data['fqdn'])

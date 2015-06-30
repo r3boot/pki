@@ -68,7 +68,7 @@ class APIClient(Parent):
         cfg_file = '{0}/client.yml'.format(self._cfg['workspace'])
         open(cfg_file, 'w').write('{0}\n'.format(cfg_data))
 
-    def new_server_cert(self, fqdn):
+    def new_server_cert(self, fqdn, vhost=False):
         san = fqdn.split('.')[0]
         path = '/autosign/servers'
         key = '{0}/private/{1}.key'.format(self._cfg['x509'], fqdn)
@@ -76,7 +76,10 @@ class APIClient(Parent):
         csr = '{0}/csr/{1}.csr'.format(self._cfg['x509'], fqdn)
         crt = '{0}/certs/{1}.pem'.format(self._cfg['x509'], fqdn)
 
-        template_file = '{0}/templates/tls-server-request.cfg.j2'.format(self._cfg['workspace'])
+        if vhost:
+            template_file = '{0}/templates/tls-vhost-request.cfg.j2'.format(self._cfg['workspace'])
+        else:
+            template_file = '{0}/templates/tls-server-request.cfg.j2'.format(self._cfg['workspace'])
         template_data = open(template_file, 'r').read()
         template = jinja2.Template(template_data)
         cfg_data = template.render(fqdn=fqdn, san=san, certs=self._cfg['certs'])
