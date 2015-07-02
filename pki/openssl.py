@@ -117,11 +117,10 @@ class CA(Parent):
         cfg = '{0}/cfg/{1}.cfg'.format(self.ca['basedir'], self.ca['name'])
         crl = '{0}/crl/{1}.crl'.format(self.ca['basedir'], self.ca['name'])
 
-        print('\n')
         info('Generating crl for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl ca -gencrl -config {0} -out {1}'.format(self.ca['cfg'], self.ca['crl'])
         os.chdir(self.basedir)
-        proc = self.run(cmdline, stdout=True)
+        proc = self.run(cmdline)
         proc.communicate()
 
 
