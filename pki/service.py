@@ -24,7 +24,16 @@ def validate_request(f):
         raw_data = bottle.request.body.read()
         data = json.loads(raw_data)
 
+        if 'fqdn' not in data:
+            warning('fqdn not found in request')
+            return bottle.HTTPResponse(status=403)
+
+        if 'token' not in data:
+            warning('token not found in request')
+            return bottle.HTTPResponse(status=403)
+
         fqdn = data['fqdn']
+        token = data['token']
         srcip = bottle.request.remote_addr
 
         ## Perform fqdn validation
@@ -35,6 +44,12 @@ def validate_request(f):
         ## Perform source ip address validation
         if not valid_srcip(srcip, fqdn):
             return bottle.HTTPResponse(status=403)
+
+        ## Check if a token is present and validate it
+        token_store = '{0}/tokens.json'.format(ca.cfg['common']['workspace'])
+        if not valid_token(token_store, fqdn, token):
+            return bottle.HTTPResponse(status=403)
+        debug('{0} uses a valid token'.format(fqdn))
 
         ## Check if a csr is present in the request, and parse it
         if 'csr' in data:
@@ -125,6 +140,7 @@ def sign_servers_cert():
 
     certificate = open(crt, 'r').read()
     return certificate
+
 
 def run(host='localhost', port=4392):
     bottle.run(host=host, port=port)
