@@ -104,3 +104,22 @@ class APIClient(Parent):
 
         info('Got certificate for {0}'.format(fqdn))
         open(crt, 'w').write(response['content'])
+
+    def revoke(self, fqdn):
+        path = '/autosign/servers'
+        crt = '{0}/certs/{1}.pem'.format(self._cfg['workspace'], fqdn)
+        if not os.path.exists(crt):
+            error('{0} does not exist'.format(crt))
+        crt_data = open(crt, 'r').read()
+
+        payload = {
+            'fqdn': fqdn,
+            'hostname': socket.gethostname(),
+            'crt': crt_data,
+            'token': self._cfg['api']['token'],
+        }
+        response = self.delete(path, payload=payload)
+        if not response['result']:
+            error('Failed to revoke certificate: {0}'.format(response['content']))
+
+        info('Revoked certificate for {0}'.format(fqdn))

@@ -1,11 +1,13 @@
 
 import bottle
+import glob
 import json
 import os
 import re
 import shlex
 import socket
 import subprocess
+import tempfile
 
 from pki.logging    import *
 
@@ -38,22 +40,27 @@ def valid_srcip(srcip, fqdn):
     @return:    False   srcip does not match any of fqdn's ip addresses
     """
 
-    ## First, check if srcip is one of fqdn's ip addresses
+    ## Check if srcip is one of fqdn's ip addresses
     try:
         socket_data = socket.getaddrinfo(fqdn, 80)
-    except socket.gaierror:
-        warning('Failed to resolve ptr records for {0}'.format(fqdn))
+    except socket.gaierror, e:
+        warning('Failed to resolve ptr records for {0}'.format(fqdn, e))
         return False
+    except:
+        warning('Unknown error resolving PTR records for {0}'.format(fqdn))
+        return False
+
     ips = []
     for item in socket_data:
         ip = item[4][0]
         if ip not in ips:
             ips.append(ip)
-    if srcip in ips:
+    if srcip not in ips:
+        ## Permissive
+        warning('{0} is not a valid ip address for {1}'.format(srcip, fqdn))
         return True
-    else:
-        warning('{0} does not belong to {1}'.format(srcip, fqdn))
-        return True
+
+    return True
 
 
 def valid_token(store, fqdn, token):
@@ -121,3 +128,64 @@ def valid_csr(ca, csr, fqdn):
             return False
 
     return True
+
+
+def valid_crt(ca, crt):
+    """ valid_crt:      Check if crt is a valid certificate in our pki
+
+    @param:     ca      Dictionary containing information about the CA
+    @param:     crt     Path towards a file containing the certificate
+    @param:     fqdn    Fully-Qualified domain-name for the host
+    @return:    True    The certificate belongs to both this PKI and the host
+    @return:    False   The certificate does not belong to either this PKI or
+                        the host
+    """
+    raw_data = bottle.request.body.read()
+    data = json.loads(raw_data)
+
+    if 'fqdn' not in data:
+        warning('No fqdn found in request')
+        return False
+    fqdn = data['fqdn']
+
+    if 'crt' not in data:
+        warning('No certificate data found in request')
+        return False
+    crt_data = data['crt']
+
+    ## Save the certificate to be revoked for later usage
+    try:
+        fd = tempfile.NamedTemporaryFile(prefix='/var/tmp/')
+    except OSError, e:
+        warning('Error creating temporary file: {0}'.format(e))
+        return bottle.HTTPResponse(status=403)
+    fd.write(crt_data)
+    fd.flush()
+
+    ## Get the fingerprint of the certificate
+    cmdline = 'openssl x509 -in {0} -noout -fingerprint'.format(fd.name)
+    cmdline = shlex.split(cmdline)
+    proc = subprocess.Popen(cmdline, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    output, err = proc.communicate()
+    fingerprint = output.replace('SHA1 Fingerprint=', '').strip()
+
+    ### Close the file descriptor towards the temporary certificate
+    fd.close()
+
+    ## Get a list of valid fingerprints from the locally generated certs
+    local_fingerprints = []
+    crt_dir = '{0}/certs'.format(ca.ca['basedir'])
+    for local_cert in glob.glob('{0}/[0-9A-Z]*.pem'.format(crt_dir)):
+        cmdline = 'openssl x509 -in {0} -noout -fingerprint'.format(local_cert)
+        cmdline = shlex.split(cmdline)
+        proc = subprocess.Popen(cmdline, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        output, err = proc.communicate()
+        local_fp = output.replace('SHA1 Fingerprint=', '').strip()
+        local_fingerprints.append(local_fp)
+
+    ## Check if crt is a valid certificate
+    if fingerprint in local_fingerprints:
+        return True
+    else:
+        warning('Certificate for {0} has an unknown fingerprint'.format(fqdn))
+        return False

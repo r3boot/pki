@@ -83,7 +83,7 @@ if __name__ == '__main__':
         type=str, default=_d_vhost,
         help='Generate a certificate for a virtual host')
     parser.add_argument('operation', nargs=1, type=str,
-        help='Operation to perform (newcert)')
+        help='Operation to perform (newcert, revoke)')
     args = parser.parse_args()
 
     ## Setup logging
@@ -91,7 +91,7 @@ if __name__ == '__main__':
 
     ## Exit if an operation is specified, and if it's valid
     operation = args.operation[0]
-    if operation not in ['newcert']:
+    if operation not in ['newcert', 'revoke']:
         parser.print_help()
         print('')
         error('{0} is an invalid operation'.format(operation))
@@ -138,6 +138,8 @@ if __name__ == '__main__':
     autosign = apiclient.APIClient(config)
     if operation == 'newcert':
         autosign.new_server_cert(fqdn, vhost=is_vhost)
+    elif operation == 'revoke':
+        autosign.revoke(fqdn)
 
     ## Restore original umask
     os.umask(old_umask)

@@ -17,9 +17,11 @@ CA_AUTOSIGN = 'autosign'
   * basedir/{{name}}/{certs,cfg,csr,db,private}
 """
 
+
 class CA(Parent):
     ca_type = None
     ca = {}
+
 
     def __init__(self, config, name=None, days=3652):
         self.cfg = config
@@ -52,8 +54,10 @@ class CA(Parent):
         self.basedir = os.path.abspath(basedir)
         self.ca_directories = ['certs', 'cfg', 'crl', 'csr', 'db', 'private']
 
+
     def gen_enddate(self):
         return time.strftime('%Y%m%d%H%M%SZ', time.localtime(time.time() + self.ca['days']))
+
 
     def setup(self, ca_data={}):
         print('\n')
@@ -104,8 +108,10 @@ class CA(Parent):
         cfg_data = template.render(cfg)
         open(cfgfile, 'w').write('{0}\n'.format(cfg_data))
 
+
     def initca(self):
         warning('Feature not implemented')
+
 
     def updatecrl(self):
         cfg = '{0}/cfg/{1}.cfg'.format(self.ca['basedir'], self.ca['name'])
@@ -118,6 +124,7 @@ class CA(Parent):
         proc = self.run(cmdline, stdout=True)
         proc.communicate()
 
+
     def sign_intermediary(self, csr, crt):
         print('\n')
         info('Signing certificate using {0} CA'.format(self.ca['name']))
@@ -126,12 +133,24 @@ class CA(Parent):
         proc = self.run(cmdline, stdout=True)
         proc.communicate()
 
+
     def autosign(self, csr, crt):
         info('Signing certificate using {0} CA'.format(self.ca['name']))
         cmdline = 'openssl ca -config {0} -in {1} -out {2} -extensions server_ext'.format(self.ca['cfg'], csr, crt)
         os.chdir(self.basedir)
         proc = self.run(cmdline, stdin=True)
         proc.communicate(input=b'y\ny\n')
+
+
+    def revoke(self, crt):
+        info('Revoking certificate using {0} CA'.format(self.ca['name']))
+        cmdline = 'openssl ca -config {0} -revoke {1} -crl_reason superseded'.format(self.ca['cfg'], crt)
+        os.chdir(self.basedir)
+        proc = self.run(cmdline)
+        proc.communicate()
+
+        self.updatecrl()
+
 
 class RootCA(CA):
     ca_type = CA_ROOT

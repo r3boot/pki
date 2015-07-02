@@ -44,6 +44,7 @@ def validate_request(f):
         ## Perform source ip address validation
         if not valid_srcip(srcip, fqdn):
             return bottle.HTTPResponse(status=403)
+        debug('{0} is a valid source ip for {1}'.format(srcip, fqdn))
 
         ## Check if a token is present and validate it
         token_store = '{0}/tokens.json'.format(ca.cfg['common']['workspace'])
@@ -51,7 +52,7 @@ def validate_request(f):
             return bottle.HTTPResponse(status=403)
         debug('{0} uses a valid token'.format(fqdn))
 
-        ## Check if a csr is present in the request, and parse it
+        ## Check if a csr is present in the request, and validate it
         if 'csr' in data:
             csr_data = data['csr']
             try:
@@ -65,7 +66,23 @@ def validate_request(f):
             fd.close()
             if not result:
                 return bottle.HTTPResponse(status=403)
-        debug('{0} submitted a valid csr'.format(fqdn))
+            debug('{0} submitted a valid csr'.format(fqdn))
+
+        ## Check if a crt is present in the request, and validate it
+        if 'crt' in data:
+            crt_data = data['crt']
+            try:
+                fd = tempfile.NamedTemporaryFile(prefix='/var/tmp/')
+            except OSError, e:
+                warning('Error creating temporary file: {0}'.format(e))
+                return bottle.HTTPResponse(status=403)
+            fd.write(crt_data)
+            fd.flush()
+            result = valid_crt(ca, fd.name)
+            fd.close()
+            if not result:
+                return bottle.HTTPResponse(status=403)
+            debug('{0} submitted a valid crt'.format(fqdn))
 
         ## Run and return the decorated function
         return f(**kwargs)
@@ -140,6 +157,40 @@ def sign_servers_cert():
 
     certificate = open(crt, 'r').read()
     return certificate
+
+
+@bottle.route('/autosign/servers', method='delete')
+@validate_request
+def revoke_certificate():
+    srcip = bottle.request.remote_addr
+    raw_data = bottle.request.body.read()
+    data = json.loads(raw_data)
+
+    if 'fqdn' not in data:
+        warning('No fqdn found in request from {0}'.format(srcip))
+        return bottle.HTTPResponse(status=403)
+    fqdn = data['fqdn']
+
+    if 'crt' not in data:
+        warning('No certificate data found in request from {0}'.format(srcip))
+        return bottle.HTTPResponse(status=403)
+    crt_data = data['crt']
+
+    ## Save the certificate to be revoked for later usage
+    try:
+        fd = tempfile.NamedTemporaryFile(prefix='/var/tmp/')
+    except OSError, e:
+        warning('Error creating temporary file: {0}'.format(e))
+        return bottle.HTTPResponse(status=403)
+    fd.write(crt_data)
+
+    ## Revoke the certificate
+    ca.revoke(fd.name)
+
+    ### Close the file descriptor towards the temporary certificate
+    fd.close()
+
+    info('Revoked the certificate for {0}'.format(fqdn))
 
 
 def run(host='localhost', port=4392):
