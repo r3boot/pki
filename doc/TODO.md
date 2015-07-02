@@ -4,4 +4,4 @@
 - Figure out a way to create different installers / deployers
 - Port to VMS
 - Make sure all api calls are properly restricted
-- Add csr subject validation
+- Add DNS validation check
