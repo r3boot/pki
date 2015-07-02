@@ -75,6 +75,11 @@ if __name__ == '__main__':
 
     if operation == 'serve':
         service.ca = openssl.AutosignCA(config, name='as65342-servers-autosign')
+        # Eww
+        for ca_data in config['autosign']:
+            if ca_data['name'] != 'servers':
+                continue
+            service.ca.cfg['common'].update(ca_data)
         service.run(host=args.host, port=args.port)
     elif operation == 'init':
         root = openssl.RootCA(config)

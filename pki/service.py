@@ -9,62 +9,53 @@ import random
 import shlex
 import socket
 import subprocess
+import tempfile
 
 from pki.logging            import *
 from pki.utils              import *
+from pki.validation         import *
 from pki.validator.client   import ValidatorClient
 
 ca =  None
 
-def validate_fqdn(srcip, fqdn):
-    data = socket.getaddrinfo(fqdn, 80)
-    fqdn_ips = []
-    for item in data:
-        ip = item[4][0]
-        if ip not in fqdn_ips:
-            fqdn_ips.append(ip)
 
-    if srcip in fqdn_ips:
-        return True
-    else:
-        warning('fqdn does not match ip address of request')
-        return True
+def validate_request(f):
+    def perform_validation(**kwargs):
+        raw_data = bottle.request.body.read()
+        data = json.loads(raw_data)
 
-def validate_token(fqdn, token):
-    token_store = '{0}/tokens.json'.format(ca.ca['workspace'])
-    if not os.path.exists(token_store):
-        warning('{0} does not exist'.format(token_store))
-        return False
-    tokens = json.loads(open(token_store, 'r').read())
-    if fqdn not in tokens:
-        warning('{0} does not have a token'.format(fqdn))
-        return False
-    elif tokens[fqdn] == token:
-        return True
-    else:
-        warning('token mismatch for {0}'.format(fqdn))
-        return False
+        fqdn = data['fqdn']
+        srcip = bottle.request.remote_addr
 
-def validate_csr(srcip, csr, fqdn=None):
-    srchost = None
-    if fqdn:
-        srchost = fqdn
-    else:
-        try:
-            srchost = socket.gethostbyaddr(srcip)
-        except socket.error:
-            warning('Failed to find PTR record for {0}'.format(srcip))
-            return False
-        srchost = srchost[0]
+        ## Perform fqdn validation
+        if not valid_fqdn(fqdn):
+            return bottle.HTTPResponse(status=403)
+        debug('{0} is a valid RFC1123 hostname'.format(fqdn))
 
-    cmdline = 'openssl req -in {0} -noout -subject'.format(csr)
-    cmd = shlex.split(cmdline)
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    output = proc.communicate()[0]
-    cn = output.split('/')[1].replace('CN=', '')
-    if cn != srchost:
-        warning('PTR record for source host does not match CN for csr')
-    return True
+        ## Perform source ip address validation
+        if not valid_srcip(srcip, fqdn):
+            return bottle.HTTPResponse(status=403)
+
+        ## Check if a csr is present in the request, and parse it
+        if 'csr' in data:
+            csr_data = data['csr']
+            try:
+                fd = tempfile.NamedTemporaryFile(prefix='/var/tmp/')
+            except OSError, e:
+                warning('Error creating temporary file: {0}'.format(e))
+                return bottle.HTTPResponse(status=403)
+            fd.write(csr_data)
+            fd.flush()
+            result = valid_csr(ca, fd.name, fqdn=fqdn)
+            fd.close()
+            if not result:
+                return bottle.HTTPResponse(status=403)
+        debug('{0} submitted a valid csr'.format(fqdn))
+
+        ## Run and return the decorated function
+        return f(**kwargs)
+    return perform_validation
+
 
 @bottle.get('/')
 def index():
@@ -107,20 +98,26 @@ def generate_token(fqdn):
 
 
 @bottle.post('/autosign/servers')
+@validate_request
 def sign_servers_cert():
+    srcip = bottle.request.remote_addr
     raw_data = bottle.request.body.read()
     data = json.loads(raw_data)
 
-    if not validate_fqdn(bottle.request.remote_addr, data['fqdn']):
+    if 'fqdn' not in data:
+        warning('No fqdn found in request from {0}'.format(srcip))
         return bottle.HTTPResponse(status=403)
+    fqdn = data['fqdn']
 
-    if not validate_token(data['hostname'], data['token']):
+    if 'csr' not in data:
+        warning('No csr found in request from {0}'.format(srcip))
         return bottle.HTTPResponse(status=403)
+    csr_data = data['csr']
 
-    csr = '{0}/csr/{1}.csr'.format(ca.ca['basedir'], data['fqdn'])
-    open(csr, 'w').write('{0}\n'.format(data['csr']))
+    csr = '{0}/csr/{1}.csr'.format(ca.ca['basedir'], fqdn)
+    open(csr, 'w').write('{0}\n'.format(csr_data))
 
-    if not validate_csr(bottle.request.remote_addr, csr, fqdn=data['fqdn']):
+    if not valid_csr(ca, csr, fqdn=data['fqdn']):
         return bottle.HTTPResponse(status=403)
 
     crt = '{0}/certs/{1}.pem'.format(ca.ca['basedir'], data['fqdn'])

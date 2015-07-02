@@ -87,16 +87,12 @@ class CA(Parent):
             error('{0} does not exist'.format(src_template))
 
         cfg = {}
-        for k,v in self.cfg['common'].items():
-            cfg[k] = v
+        cfg.update(self.cfg['common'])
 
         if self.ca_type in [CA_AUTOSIGN]:
-            for k,v in ca_data.items():
-                cfg[k] = v
+            cfg.update(ca_data)
         else:
-            for k,v in self.cfg[self.ca_type].items():
-                cfg[k] = v
-
+            cfg.update(self.cfg[self.ca_type])
 
         cfg['crypto'] = self.cfg['crypto']
         cfg['basedir'] = '{0}/{1}'.format(self.ca['workspace'], self.name)
