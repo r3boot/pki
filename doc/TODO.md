@@ -4,4 +4,4 @@
 - Port to VMS
 - Make sure all api calls are properly restricted
 - Add DNS validation check
-- Move templates to mako templates
+- Make days configurable

@@ -1,7 +1,7 @@
 
 from Crypto.Hash    import SHA256
 
-import jinja2
+import mako.template
 import json
 import os
 import requests
@@ -81,7 +81,7 @@ class APIClient(Parent):
         else:
             template_file = '{0}/templates/tls-server-request.cfg.j2'.format(self._cfg['workspace'])
         template_data = open(template_file, 'r').read()
-        template = jinja2.Template(template_data)
+        template = mako.template.Template(template_data)
         cfg_data = template.render(fqdn=fqdn, san=san, certs=self._cfg['certs'])
         open(cfg, 'w').write(cfg_data)
 

@@ -1,6 +1,6 @@
 
 import getpass
-import jinja2
+import mako.template
 import os
 import time
 
@@ -104,8 +104,8 @@ class CA(Parent):
         cfg['name'] = self.name
 
         template_data = open(src_template, 'r').read()
-        template = jinja2.Template(template_data)
-        cfg_data = template.render(cfg)
+        template = mako.template.Template(template_data)
+        cfg_data = template.render(**cfg)
         open(cfgfile, 'w').write('{0}\n'.format(cfg_data))
 
 

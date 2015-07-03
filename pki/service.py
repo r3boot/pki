@@ -2,7 +2,7 @@
 from Crypto.Hash    import SHA256
 
 import bottle
-import jinja2
+import mako.template
 import json
 import os
 import random
@@ -120,7 +120,7 @@ def generate_token(fqdn):
     open(token_store, 'w').write(json.dumps(tokens))
 
     template_data = open(template_file, 'r').read()
-    template = jinja2.Template(template_data)
+    template = mako.template.Template(template_data)
     cfg_data = template.render(
         server_host='127.0.0.1',
         server_port=4392,

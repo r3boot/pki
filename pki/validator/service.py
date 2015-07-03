@@ -2,7 +2,6 @@
 from Crypto.Hash    import SHA256
 
 import json
-import jinja2
 import random
 import socket
 import threading

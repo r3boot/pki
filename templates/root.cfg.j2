@@ -1,27 +1,27 @@
 # {{cn}}
 
 [ default ]
-ca                      = {{name}}      # CA name
+ca                      = ${name}      # CA name
 dir                     = .           # Top dir
-base_url                = {{baseurl}}           # CA base URL
-aia_url                 = {{baseurl}}/{{name}}.pem     # CA certificate URL
-crl_url                 = {{baseurl}}/{{name}}.crl     # CRL distribution point
-{% if ca_type == 'autosign' %}
-oscp_url                = {{oscpurl}}
-{% endif %}
+base_url                = ${baseurl}           # CA base URL
+aia_url                 = ${baseurl}/{name}.pem     # CA certificate URL
+crl_url                 = ${baseurl}/{name}.crl     # CRL distribution point
+% if ca_type == "autosign":
+oscp_url                = ${oscpurl}
+% endif
 name_opt                = multiline,-esc_msb,utf8 # Display UTF-8 characters
 openssl_conf            = openssl_init          # Library config section
 
 # CA certificate request
 
 [ req ]
-default_bits            = {{crypto.bits}}              # RSA key size
-{% if ca_type == "autosign" %}
+default_bits            = ${crypto['bits']}              # RSA key size
+% if ca_type == "autosign":
 encrypt_key             = no                   # Protect private key
-{% else %}
+% else:
 encrypt_key             = yes                   # Protect private key
-{% endif %}
-default_md              = {{crypto.hash}}              # MD to use
+% endif
+default_md              = ${crypto['hash']}              # MD to use
 utf8                    = yes                   # Input is UTF-8
 string_mask             = utf8only              # Emit UTF-8 strings
 prompt                  = no                    # Don't prompt for DN
@@ -29,28 +29,28 @@ distinguished_name      = ca_dn                 # DN section
 req_extensions          = ca_reqext             # Desired extensions
 
 [ ca_dn ]
-countryName             = "{{country}}"
-stateOrProvinceName     = "{{province}}"
-localityName            = "{{city}}"
-organizationName        = "{{organization}}"
-organizationalUnitName  = "{{unit}}"
-commonName              = "{{cn}}"
+countryName             = "${country}"
+stateOrProvinceName     = "${province}"
+localityName            = "${city}"
+organizationName        = "${organization}"
+organizationalUnitName  = "${unit}"
+commonName              = "${cn}"
 
 [ ca_reqext ]
 keyUsage                = critical,keyCertSign,cRLSign
-{% if ca_type == 'autosign' %}
+% if ca_type == "autosign":
 basicConstraints        = critical,CA:true,pathlen:0
-{% else %}
+% else:
 basicConstraints        = critical,CA:true
-{% endif %}
+% endif
 subjectKeyIdentifier    = hash
 
 # CA operational settings
 
 [ ca ]
-default_ca              = {{name}}         # The default CA section
+default_ca              = ${name}         # The default CA section
 
-[ {{name}} ]
+[ ${name} ]
 certificate             = $dir/certs/$ca.pem       # The CA cert
 private_key             = $dir/private/$ca.key # CA private key
 new_certs_dir           = $dir/certs           # Certificate archive
@@ -59,27 +59,27 @@ crlnumber               = $dir/db/$ca-crl.idx # CRL number file
 database                = $dir/db/$ca.db # Index file
 unique_subject          = no                    # Require unique subject
 default_days            = 3652                  # How long to certify for
-default_md              = {{crypto.hash}}              # MD to use
+default_md              = ${crypto['hash']}              # MD to use
 policy                  = match_pol             # Default naming policy
 email_in_dn             = no                    # Add email to cert DN
 preserve                = no                    # Keep passed DN ordering
 name_opt                = $name_opt             # Subject DN display options
 cert_opt                = ca_default            # Certificate display options
-{% if ca_type == "autosign" %}
+% if ca_type == "autosign":
 copy_extensions         = copy # Copy extensions from CSR
-{% else %}
+% else:
 copy_extensions         = none                  # Copy extensions from CSR
-{% endif %}
-{% if ca_type == "root" %}
+% endif
+% if ca_type == "root":
 x509_extensions         = intermediate_ca_ext   # Default cert extensions
 default_crl_days        = 30                    # How long before next CRL
-{% elif ca_type == "intermediary" %}
+% elif ca_type == "intermediary":
 x509_extensions         = signing_ca_ext        # Default cert extensions
 default_crl_days        = 1                     # How long before next CRL
-{% elif ca_type == "autosign" %}
+% elif ca_type == "autosign":
 x509_extensions         = server_ext           # Default cert extensions
 default_crl_days        = 1                     # How long before next CRL
-{% endif %}
+% endif
 crl_extensions          = crl_ext               # CRL extensions
 
 [ match_pol ]
@@ -101,14 +101,14 @@ commonName              = optional
 emailAddress            = optional
 
 # Extensions
-{% if ca_type == "root" %}
+% if ca_type == "root":
 [ root_ca_ext ]
 keyUsage                = critical,keyCertSign,cRLSign
 basicConstraints        = critical,CA:true
 subjectKeyIdentifier    = hash
 authorityKeyIdentifier  = keyid:always
-{% endif %}
-{% if ca_type != 'autosign' %}
+% endif %}
+% if ca_type != "autosign":
 [ intermediate_ca_ext ]
 keyUsage                = critical,keyCertSign,cRLSign
 basicConstraints        = critical,CA:true
@@ -117,8 +117,8 @@ authorityKeyIdentifier  = keyid:always
 authorityInfoAccess     = @issuer_info
 crlDistributionPoints   = @crl_info
 certificatePolicies     = MediumAssurance,MediumDevice
-{% endif %}
-{% if ca_type == "intermediate" %}
+% endif
+% if ca_type == "intermediate":
 [ signing_ca_ext ]
 keyUsage                = critical,keyCertSign,cRLSign
 basicConstraints        = critical,CA:true,pathlen:0
@@ -127,8 +127,8 @@ authorityKeyIdentifier  = keyid:always
 authorityInfoAccess     = @issuer_info
 crlDistributionPoints   = @crl_info
 certificatePolicies     = MediumAssurance,MediumDevice
-{% endif %}
-{% if ca_type == 'autosign' %}
+% endif
+% if ca_type == "autosign":
 [ server_ext ]
 keyUsage                = critical,digitalSignature,keyEncipherment
 basicConstraints        = CA:false
@@ -148,23 +148,23 @@ authorityKeyIdentifier  = keyid:always
 authorityInfoAccess     = @issuer_info
 noCheck                 = null
 certificatePolicies     = MediumDevice
-{% endif %}
+% endif
 
 [ crl_ext ]
 authorityKeyIdentifier  = keyid:always
 authorityInfoAccess     = @issuer_info
 
-{% if ca_type == 'autosign' %}
+% if ca_type == "autosign":
 [ ocsp_info ]
-caIssuers;URI.0         = {{baseurl}}/{{name}}.pem
-OCSP;URI.0              = {{oscpurl}}
+caIssuers;URI.0         = ${baseurl}/${name}.pem
+OCSP;URI.0              = ${oscpurl}
 
-{% endif %}
+% endif
 [ issuer_info ]
-caIssuers;URI.0         = {{baseurl}}/{{name}}.pem
+caIssuers;URI.0         = ${baseurl}/${name}.pem
 
 [ crl_info ]
-URI.0                   = {{baseurl}}/{{name}}.crl
+URI.0                   = ${baseurl}/${name}.crl
 
 # Policy OIDs
 
@@ -172,7 +172,7 @@ URI.0                   = {{baseurl}}/{{name}}.crl
 oid_section             = additional_oids
 
 [ additional_oids ]
-{% if ca_type != 'autosign' %}
+% if ca_type != "autosign":
 MediumAssurance     = AS65342 Medium Assurance, 1.3.6.1.4.1.0.1.7.8
-{% endif %}
+% endif
 MediumDevice        = AS65342 Medium Device Assurance, 1.3.6.1.4.1.0.1.7.9
