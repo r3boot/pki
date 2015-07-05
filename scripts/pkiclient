@@ -254,7 +254,7 @@ class APIClient:
         open(cfg, 'w').write(cfg_data)
 
         info('Generating key and csr for {0}'.format(fqdn))
-        cfg_file = '{0}/cfg/{1  }.cfg'.format(self._cfg['workspace'], fqdn)
+        cfg_file = '{0}/cfg/{1}.cfg'.format(self._cfg['workspace'], fqdn)
         cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
             cfg_file, csr, key
         )
