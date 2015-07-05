@@ -1,7 +1,8 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 
 import argparse
 import os
+import platform
 import pprint
 import shlex
 import subprocess
@@ -186,14 +187,6 @@ class CA:
         self.name = name
         self.basedir = os.path.abspath(basedir)
         self.ca_directories = ['certs', 'cfg', 'crl', 'csr', 'db', 'private']
-
-    def full_path(self, fname):
-        """ full_path:  Helper function to return a full path on unix or vms
-
-        @param:     fname   Filename to return the full path for
-        @return:    str     String containing the full path to the file
-        """
-        return fpath(os.path.abspath(fname))
 
     def gen_enddate(self):
         """ gen_enddate:    Helper function to generate an enddate timestamp
@@ -416,6 +409,12 @@ if __name__ == '__main__':
 
     # Initialize debug logging
     enable_debug = args.debug
+
+    # Display the platform we're running on
+    debug('Running under Python {0} on {1}'.format(
+        platform.python_version(),
+        os.uname()[0],
+    ))
 
     # Exit if configuration file does not exist
     if not os.path.exists(args.cfgfile):

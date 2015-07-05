@@ -213,8 +213,9 @@ class APIClient:
         @param:     fqdn    Fully-Qualified Domain-Name for this host
         @param:     token   Initial installation token to use
         """
-        path = '/token/{0}'.format(fqdn)
+        path = '/v1/token'
         payload = {
+            'fqdn': fqdn,
             'token': token,
         }
         info('Sending request for new token')
@@ -236,7 +237,7 @@ class APIClient:
                             the fqdn for this host
         """
         san = fqdn.split('.')[0]
-        path = '/autosign/servers'
+        path = '/v1/sign'
         key = '{0}/private/{1}.key'.format(self._cfg['x509'], fqdn)
         cfg = '{0}/cfg/{1}.cfg'.format(self._cfg['x509'], fqdn)
         csr = '{0}/csr/{1}.csr'.format(self._cfg['x509'], fqdn)
@@ -289,7 +290,7 @@ class APIClient:
 
         @param:     fqdn    Fully-Qualified Domain-Name to be revoked
         """
-        path = '/autosign/servers'
+        path = '/v1/revoke'
         crt = '{0}/certs/{1}.pem'.format(self._cfg['workspace'], fqdn)
         if not os.path.exists(crt):
             error('{0} does not exist'.format(crt))
@@ -346,7 +347,7 @@ class ValidatorAPI(threading.Thread):
     """
 
     def __init__(self, host=None, port=None):
-        """ __init__:   Initialize the ValidatorAPI
+        """ __init__:   Initialize the ValidatorAPI class
 
         @param:     host    IP address or host to bind api on
         @param:     port    Port to bind api on
@@ -361,7 +362,8 @@ class ValidatorAPI(threading.Thread):
 
         self._app = bottle.Bottle()
         self._server = ManagedWSGIServer(host=host, port=port)
-        self._app.route('/validate', method='GET', callback=self.serve_token)
+        self._app.route('/v1/validate', method='GET',
+                        callback=self.serve_token)
         sha = hashlib.sha256()
         sha.update(str(random.random()).encode('utf-8'))
         self.token = sha.hexdigest()
@@ -385,8 +387,8 @@ class ValidatorAPI(threading.Thread):
         @param:     cfg_file    Where to store the new configuration
         @param:     fqdn        Fully-Qualified Domain-Name for this host
         """
-        path = '{0}/token/{1}'.format(url, fqdn)
-        payload = json.dumps({'token': self.token})
+        path = '{0}/v1/token'.format(url)
+        payload = json.dumps({'fqdn': fqdn, 'token': self.token})
         info('Sending request for new token')
         r = None
         cfg_data = None

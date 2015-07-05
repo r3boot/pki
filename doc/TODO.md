@@ -8,6 +8,7 @@
 - Make sure templates are installed into workspace
 - Move pki/ dependencies into the various scripts
 - Un-fudge the various configuration dicts (self.ca, self.cfg, etc)
+- Move templates into scripts
 
 ### pkiclient
 - fetch_new_token_and_config -> make hostname based on socket.gethostname()

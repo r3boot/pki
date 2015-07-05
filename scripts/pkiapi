@@ -1,0 +1,754 @@
+#!/usr/bin/env python
+
+import argparse
+import glob
+import hashlib
+import json
+import os
+import random
+import re
+import shlex
+import socket
+import subprocess
+import sys
+
+
+# Handle external dependencies
+try:
+    import bottle
+except ImportError:
+    print('Failed to import bottle, please run "pip install bottle"')
+    sys.exit(1)
+
+try:
+    import mako.template
+except ImportError:
+    print('Failed to import mako, please run "pip install mako"')
+    sys.exit(1)
+
+try:
+    import requests
+except ImportError:
+    print('Failed to import requests, please run "pip install requests"')
+    sys.exit(1)
+
+try:
+    import yaml
+except ImportError:
+    print('Failed to import PyYaml, please run "pip install pyyaml"')
+    sys.exit(1)
+
+
+# Set module details
+__description__ = 'AS65342 PKI -- Server component'
+__version__ = 0.1
+__author__ = 'Lex van Roon'
+__email__ = 'r3boot@r3blog.nl'
+__url__ = 'https://gitlab.as65342.net/r3boot/pki'
+
+
+# Various constants used between Unix and VMS
+C_OSNAME = os.uname()[0]
+C_TMPDIR = '/var/tmp/'
+
+if C_OSNAME == 'OpenVMS':
+    C_TMPDIR = '/cluster/temp/'
+
+
+# Various default values used as CLI arguments
+_d_debug = False
+_d_cfgfile = '/etc/pki/server.yml'
+_d_workspace = '/etc/pki'
+_d_host = 'localhost'
+_d_port = 4392
+
+
+# Helper dictionary containing a yaml to subject mapping
+_subject_to_yaml = {
+    'C':    'country',
+    'ST':   'province',
+    'L':    'city',
+    'O':    'organization',
+    'OU':   'unit',
+}
+
+
+# Global variable to contain the CA details
+ca = None
+
+
+def fpath(name):
+    """ fpath:      Helper function which converts a unix path to an openvms
+                    path.
+
+    @param:     name    String containing the unix path to convert
+    @return:    str     Translated path if running under vms, else name
+    """
+    if os.uname()[0] != 'OpenVMS':
+        return name
+    t = name.split('/')[1:]
+    device = t[0]
+    path = '.'.join(t[1:len(t)-1])
+    fname = t[len(t)-1]
+    return '{0}:[{1}]{2}'.format(device, path, fname)
+
+
+def fhost(name):
+    """ fhost:      Helper function which converts a dotted hostname to a
+                    underscore-based hostname to be used under openvms
+
+    @param:     name    String containing the hostname to convert
+    @return:    str     Translated hostname if running under vms, else name
+    """
+    return name.replace('.', '_')
+
+
+def run(cmd, stdin=False, stdout=False):
+    """ run:        Wrapper around subprocess.Popen to setup the various FDs
+
+    @param:     stdin   If True, make stdin a PIPE, else None
+    @param:     stdout  If True, make stdout a PIPE, else None
+    @return:    proc    Object containing the Popen result
+    """
+    cmd = shlex.split(cmd)
+
+    stdin_fd = None
+    if stdin:
+        stdin_fd = subprocess.PIPE
+
+    stdout_fd = None
+    if stdout:
+        stdout_fd = subprocess.PIPE
+
+    return subprocess.Popen(cmd, stdin=stdin_fd, stdout=stdout_fd,
+                            stderr=stdout_fd)
+
+
+def print_message(prefix, message):
+    """ print_message:      Prints a message on the screen using a prefix
+
+    @param:     prefix      Prefix to use
+    @param:     message     Message to display
+    """
+    print('{0} {1}'.format(prefix, message))
+
+
+def info(message):
+    """ info:           Display an informational message
+
+    @param:     message Message to display
+    """
+    print_message('[+]', message)
+
+
+def warning(message):
+    """ warning:    Display a warning message
+
+    @param:     message Message to display
+    """
+    print_message('[W]', message)
+
+
+def debug(message):
+    """ warning:    Display a debug message if debugging is enabled
+
+    @param:     message Message to display
+    """
+    if not enable_debug:
+        return
+    print_message('[D]', message)
+
+
+def error(message):
+    """ warning:    Display an error message and exit the application
+
+    @param:     message Message to display
+    """
+    print_message('[E]', message)
+    sys.exit(1)
+
+
+def gentoken():
+    """ gentoken:   Generate a random sha256 encoded token
+
+    @return:    str Encoded token
+    """
+    sha = hashlib.sha256()
+    sha.update(str(random.random()).encode('utf-8'))
+    return sha.hexdigest()
+
+
+def mkstemp(prefix=''):
+    """ mkstemp:    Create a newly opened file with a random filename in a
+                    way it can be used under VMS
+
+    @param:     prefix  Optional prefix to be prefixed before the random name
+    @return:    int     Opened file descriptor pointing towards the filename
+    """
+    fname = '{0}{1}.tmp'.format(prefix, gentoken()[0:6])
+    fd = open(fname, 'w')
+    return fd
+
+
+def valid_fqdn(fqdn):
+    """ valid_fqdn: Matches valid hostnames based on RFC1123
+
+    @param:     fqdn    Fully-qualified domain-name to check
+    @return:    True    fqdn is a valid hostname
+    @return:    False   fqdn does not match a valid hostname
+    """
+    regexp = '^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*'
+    regexp += '([A-Za-z0-9]  |[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$'
+    r = re.compile(regexp)
+    result = r.search(fqdn)
+    return result is not None
+
+
+def valid_srcip(srcip, fqdn):
+    """ valid_srcip:    Check if the source ip matches the fqdn
+
+    @param:     srcip   Source ip address in string form
+    @param:     fqdn    Fully-qualified domain-name to match against srcip
+    @return:    True    srcip is one of fqdn's ip addresses
+    @return:    False   srcip does not match any of fqdn's ip addresses
+    """
+
+    # Check if srcip is one of fqdn's ip addresses
+    try:
+        socket_data = socket.getaddrinfo(fqdn, 80)
+    except socket.gaierror as e:
+        warning('Failed to resolve ptr records for {0}'.format(fqdn, e))
+        return False
+    except:
+        warning('Unknown error resolving PTR records for {0}'.format(fqdn))
+        return False
+
+    ips = []
+    for item in socket_data:
+        ip = item[4][0]
+        if ip not in ips:
+            ips.append(ip)
+    if srcip not in ips:
+        # Permissive
+        warning('{0} is not a valid ip address for {1}'.format(srcip, fqdn))
+        return True
+
+    return True
+
+
+def valid_token(store, fqdn, token):
+    """ valid_token:    Check if the token exists and belongs to fqdn
+
+    @param:     store   Path to a file containing the store of tokens in json
+    @param:     fqdn    Fully-qualified domain-name to match with
+    @param:     token   Client token
+    @return:    True    fqdn + token are specified as a couple in the store
+    @return:    False   Either fqdn does not exists, or the token is invalid
+    """
+    if not os.path.exists(store):
+        warning('{0} does not exist, cannot validate token'.format(store))
+        return False
+
+    # Check if fqdn has a token at all
+    tokens = json.loads(open(store, 'r').read())
+    if fqdn not in tokens:
+        warning('{0} does not have a token'.format(fqdn))
+        return False
+
+    # Check if the token matches the stored token for fqdn
+    if tokens[fqdn] == token:
+        return True
+    else:
+        warning('Token mismatch for {0}'.format(fqdn))
+        return False
+
+
+def valid_csr(ca, csr, fqdn):
+    """ valid_csr:      Validate various fields within the csr
+
+    @param:     ca          Dictionary containing information of the signing CA
+    @param:     csr         Path to the file containing the csr'
+    @param:     fqdn        Fully-qualified domain-name to check against
+    @return:    True        All checked fields validate
+    @return:    False       One or more fields have issues
+    """
+    cmdline = 'openssl req -in {0} -noout -subject'.format(csr)
+    proc = run(cmdline, stdout=True)
+    output, err = proc.communicate()
+    output = output.decode('utf-8').replace('subject=/', '').strip()
+    raw_subject = output.split('/')
+    for item in raw_subject:
+        field, value = item.split('=')
+
+        # CN field needs special handling
+        if field == 'CN':
+            if value != fqdn:
+                warning('CN field does not match requested fqdn')
+                return False
+            else:
+                continue
+
+        # Check if the field exists
+        if _subject_to_yaml[field] not in ca.cfg['common']:
+            warning('Unknown field found in csr: {0}'.format(field))
+            return False
+
+        # Check if field matches the values for the CA
+        if ca.cfg['common'][_subject_to_yaml[field]] != value:
+            warning('{0} field does not match the default fields'.format(
+                field
+            ))
+            return False
+
+    return True
+
+
+def valid_crt(ca, crt):
+    """ valid_crt:      Check if crt is a valid certificate in our pki
+
+    @param:     ca      Dictionary containing information about the CA
+    @param:     crt     Path towards a file containing the certificate
+    @param:     fqdn    Fully-Qualified domain-name for the host
+    @return:    True    The certificate belongs to both this PKI and the host
+    @return:    False   The certificate does not belong to either this PKI or
+                        the host
+    """
+    raw_data = bottle.request.body.read()
+    data = json.loads(raw_data.decode('utf-8'))
+
+    if 'fqdn' not in data:
+        warning('No fqdn found in request')
+        return False
+    fqdn = data['fqdn']
+
+    if 'crt' not in data:
+        warning('No certificate data found in request')
+        return False
+    crt_data = data['crt']
+
+    # Save the certificate to be revoked for later usage
+    try:
+        fd = mkstemp(prefix=C_TMPDIR)
+    except OSError as e:
+        warning('Error creating temporary file: {0}'.format(e))
+        return bottle.HTTPResponse(status=403)
+    fd.write(crt_data)
+    fd.close()
+
+    # Get the fingerprint of the certificate
+    cmdline = 'openssl x509 -in {0} -noout -fingerprint'.format(fd.name)
+    proc = run(cmdline, stdout=True)
+    output, err = proc.communicate()
+    output = output.decode('utf-8')
+    fingerprint = output.replace('SHA1 Fingerprint=', '').strip()
+
+    # Remove the temporary file containing the certificate
+    os.unlink(fd.name)
+
+    # Get a list of valid fingerprints from the locally generated certs
+    local_fingerprints = []
+    crt_dir = '{0}/certs'.format(ca.ca['basedir'])
+    for local_cert in glob.glob('{0}/[0-9A-Z]*.pem'.format(crt_dir)):
+        cmdline = 'openssl x509 -in {0} -noout -fingerprint'.format(local_cert)
+        proc = run(cmdline, stdout=True)
+        output, err = proc.communicate()
+        output = output.decode('utf-8')
+        local_fp = output.replace('SHA1 Fingerprint=', '').strip()
+        local_fingerprints.append(local_fp)
+
+    # Check if crt is a valid certificate
+    if fingerprint in local_fingerprints:
+        return True
+    else:
+        warning('Certificate for {0} has an unknown fingerprint'.format(fqdn))
+        return False
+
+
+def validate_request(f):
+    """ validate_request:   Decorator used to validate a client request
+    """
+    def perform_validation(none, **kwargs):
+        """ perform_validation: Perform the actual validation and if allowed
+                                call the decorated function
+        """
+        raw_data = bottle.request.body.read()
+        data = json.loads(raw_data.decode('utf-8'))
+
+        if 'fqdn' not in data:
+            warning('fqdn not found in request')
+            return bottle.HTTPResponse(status=403)
+
+        if 'token' not in data:
+            warning('token not found in request')
+            return bottle.HTTPResponse(status=403)
+
+        fqdn = data['fqdn']
+        token = data['token']
+        srcip = bottle.request.remote_addr
+
+        # Perform fqdn validation
+        if not valid_fqdn(fqdn):
+            return bottle.HTTPResponse(status=403)
+        debug('{0} is a valid RFC1123 hostname'.format(fqdn))
+
+        # Perform source ip address validation
+        if not valid_srcip(srcip, fqdn):
+            return bottle.HTTPResponse(status=403)
+        debug('{0} is a valid source ip for {1}'.format(srcip, fqdn))
+
+        # Check if a token is present and validate it
+        token_store = '{0}/tokens.json'.format(ca.cfg['common']['workspace'])
+        if not valid_token(token_store, fqdn, token):
+            return bottle.HTTPResponse(status=403)
+        debug('{0} uses a valid token'.format(fqdn))
+
+        # Check if a csr is present in the request, and validate it
+        if 'csr' in data:
+            csr_data = data['csr']
+            try:
+                fd = mkstemp(prefix=C_TMPDIR)
+            except OSError as e:
+                warning('Error creating temporary file: {0}'.format(e))
+                return bottle.HTTPResponse(status=403)
+            fd.write(csr_data)
+            fd.close()
+            result = valid_csr(ca, fpath(fd.name), fqdn=fqdn)
+            os.unlink(fd.name)
+            if not result:
+                return bottle.HTTPResponse(status=403)
+            debug('{0} submitted a valid csr'.format(fqdn))
+
+        # Check if a crt is present in the request, and validate it
+        if 'crt' in data:
+            crt_data = data['crt']
+            try:
+                fd = mkstemp(prefix=C_TMPDIR)
+            except OSError as e:
+                warning('Error creating temporary file: {0}'.format(e))
+                return bottle.HTTPResponse(status=403)
+            fd.write(crt_data)
+            fd.close()
+            result = valid_crt(ca, fpath(fd.name))
+            os.unlink(fd.name)
+            if not result:
+                return bottle.HTTPResponse(status=403)
+            debug('{0} submitted a valid crt'.format(fqdn))
+
+        # Run and return the decorated function
+        return f(**kwargs)
+    return perform_validation
+
+
+class AutosignCA:
+    """ AutosignCA:     Class representing the autosign CA
+    """
+
+    def __init__(self, config):
+        """ __init__:   Initializes the AutosignCA class
+
+        @param:     config  Dictionary containing the pki configuration
+        """
+        self.cfg = config
+        name = '{0}-autosign'.format(self.cfg['common']['name'])
+        basedir = '{0}/{1}'.format(self.cfg['common']['workspace'], name)
+
+        self.ca = {
+            'name': name,
+            'workspace': self.cfg['common']['workspace'],
+            'basedir': basedir,
+            'baseurl': self.cfg['common']['baseurl'],
+            'cfg': fpath('{0}/cfg/{1}.cfg'.format(basedir, name)),
+            'csr': fpath('{0}/csr/{1}.csr'.format(basedir, name)),
+            'crl': fpath('{0}/crl/{1}.crl'.format(basedir, name)),
+            'key': fpath('{0}/private/{1}.key'.format(basedir, name)),
+            'crt': fpath('{0}/certs/{1}.pem'.format(basedir, name)),
+            'db': fpath('{0}/db/{1}.db'.format(basedir, name)),
+            'db_attr': fpath('{0}/db/{1}-db.attr'.format(basedir, name)),
+            'crt_idx': fpath('{0}/db/{1}-crt.idx'.format(basedir, name)),
+            'crl_idx': fpath('{0}/db/{1}-crl.idx'.format(basedir, name)),
+        }
+        self.name = name
+        self.basedir = os.path.abspath(basedir)
+        self.ca_directories = ['certs', 'cfg', 'crl', 'csr', 'db', 'private']
+
+    def updatecrl(self):
+        """ updatecrl:  Updates the Certificate Revocation list for this CA
+        """
+        info('Generating crl for {0} CA'.format(self.ca['name']))
+        cmdline = 'openssl ca -gencrl -config {0} -out {1}'.format(
+            fpath(self.ca['cfg']),
+            fpath(self.ca['crl']),
+        )
+        os.chdir(self.basedir)
+        proc = run(cmdline, stdout=True)
+        proc.communicate()
+
+    def autosign(self, csr, crt):
+        """ autosign:   Autosigns a csr using this CA
+
+        @param:     csr Path to the Certificate Signing Request
+        @param:     crt Path to the generated certificate
+        """
+        info('Signing certificate using {0} CA'.format(self.ca['name']))
+        cmdline = 'openssl ca -config {0} -in {1} -out {2}'.format(
+            fpath(self.ca['cfg']),
+            fpath(csr),
+            fpath(crt),
+        )
+        cmdline += ' -extensions server_ext'
+        os.chdir(self.basedir)
+        proc = run(cmdline, stdin=True, stdout=True)
+        output, err = proc.communicate(input=b'y\ny\n')
+
+    def revoke(self, crt):
+        """ revoke:     Revokes a certificate under this CA
+
+        @param:     crt Path to certificate to revoke
+        """
+        info('Revoking certificate using {0} CA'.format(self.ca['name']))
+        cmdline = 'openssl ca -config {0} -revoke {1}'.format(
+            fpath(self.ca['cfg']),
+            fpath(crt),
+        )
+        cmdline += ' -crl_reason superseded'
+        os.chdir(self.basedir)
+        proc = run(cmdline, stdout=True)
+        proc.communicate()
+
+        self.updatecrl()
+
+
+class ValidatorClient:
+    """ ValidatorClient:    Class containing the server-side validator client
+    """
+    def __init__(self, fqdn, port=4393):
+        """ __init__    Initializes the ValidatorClient class
+
+        @param:     fqdn    Fully-Qualified Domain-Name of the validator api
+        @param:     port    Port on which the validator api is running
+        """
+        self._url = 'http://{0}:{1}/v1/validate'.format(fqdn, port)
+
+    def validate(self, req_token):
+        """ validate:   Perform a validation request, and compare the token
+                        with the token from the initial request
+
+        @param:     req_token   Token supplied in the initial validation
+                                request from the client
+        @return:    True        The remote validator returned the correct token
+        @return:    False       The remote validator returned an incorrect
+                                token
+        """
+        recv_token = None
+
+        debug('Sending validation request to {0}'.format(self._url))
+        r = None
+        try:
+            r = requests.get(self._url)
+        except requests.exceptions.ConnectionError as e:
+            warning('Failed to connect to {0}: {1}'.format(self._url, e))
+            return
+        finally:
+            if r and r.status_code == 200:
+                recv_token = r.content.decode('utf-8')
+
+        return req_token == recv_token
+
+
+class AutosignAPI:
+    """ AutosignAPI:    The server-side autosigning/revoking api
+    """
+    def __init__(self, host='127.0.0.1', port=4392):
+        """ __init__:   Initializes the AutosignAPI class
+
+        @param:     host    Host or ip address to bind api on
+        @param:     port    Port to bind api on
+        """
+        self._host = host
+        self._port = port
+
+        self._app = bottle.Bottle()
+        self._app.route('/', method='get', callback=self.index)
+        self._app.route('/v1/token', method='post',
+                        callback=self.generate_token)
+        self._app.route('/v1/sign', method='post',
+                        callback=self.sign_certificate)
+        self._app.route('/v1/revoke', method='delete',
+                        callback=self.revoke_certificate)
+
+    def index(self):
+        """ index:  Callback to be called when the '/' url is requested
+        """
+        return 'Managed PKI service'
+
+    def generate_token(self):
+        """ generate:   Generates a token when called on '/v1/token' with
+                        the GET method
+        @returns    str String containing the configuration file with the
+                        new token to be used by the client
+        """
+        raw_data = bottle.request.body.read()
+        data = json.loads(raw_data.decode('utf-8'))
+
+        if 'fqdn' not in data:
+            warning('fqdn not found in request')
+            return bottle.HTTPResponse(status=403, body='Not authenticated')
+        fqdn = data['fqdn']
+
+        template_file = '{0}/templates/client_yml.template'.format(
+            ca.cfg['common']['workspace'])
+        if not os.path.exists(template_file):
+            warning('{0} does not exist'.format(template_file))
+            return bottle.HTTPResponse(status=501, body='Internal error')
+
+        debug('Received new token request from {0}'.format(fqdn))
+        req_token = data['token']
+        if not ValidatorClient(fqdn).validate(req_token):
+            warning('{0} initial token mismatch'.format(fqdn))
+            return bottle.HTTPResponse(status=403, body='Not authenticated')
+
+        token = gentoken()
+
+        token_store = '{0}/tokens.json'.format(ca.cfg['common']['workspace'])
+        tokens = {}
+        if os.path.exists(token_store):
+            tokens = json.loads(open(token_store, 'r').read())
+        tokens[fqdn] = token
+        open(token_store, 'w').write(json.dumps(tokens))
+
+        template_data = open(template_file, 'r').read()
+        template = mako.template.Template(template_data)
+        cfg_data = template.render(
+            server_host='127.0.0.1',
+            server_port=4392,
+            client_token=token,
+        )
+        return cfg_data
+
+    @validate_request
+    def sign_certificate():
+        srcip = bottle.request.remote_addr
+        raw_data = bottle.request.body.read()
+        data = json.loads(raw_data.decode('utf-8'))
+
+        if 'fqdn' not in data:
+            warning('No fqdn found in request from {0}'.format(srcip))
+            return bottle.HTTPResponse(status=403)
+        fqdn = data['fqdn']
+
+        if 'csr' not in data:
+            warning('No csr found in request from {0}'.format(srcip))
+            return bottle.HTTPResponse(status=403)
+        csr_data = data['csr']
+
+        csr = '{0}/csr/{1}.csr'.format(ca.ca['basedir'], fhost(fqdn))
+        open(csr, 'w').write('{0}\n'.format(csr_data))
+
+        if not valid_csr(ca, csr, fqdn=fqdn):
+            return bottle.HTTPResponse(status=403)
+
+        crt = '{0}/certs/{1}.pem'.format(ca.ca['basedir'], fhost(fqdn))
+        ca.autosign(csr, crt)
+
+        certificate = open(crt, 'r').read()
+        return certificate
+
+    @validate_request
+    def revoke_certificate():
+        srcip = bottle.request.remote_addr
+        raw_data = bottle.request.body.read()
+        data = json.loads(raw_data.decode('utf-8'))
+
+        if 'fqdn' not in data:
+            warning('No fqdn found in request from {0}'.format(srcip))
+            return bottle.HTTPResponse(status=403)
+        fqdn = data['fqdn']
+
+        if 'crt' not in data:
+            warning('No certificate data found in request from {0}'.format(
+                srcip
+            ))
+            return bottle.HTTPResponse(status=403)
+        crt_data = data['crt']
+
+        # Save the certificate to be revoked for later usage
+        try:
+            fd = mkstemp(prefix=C_TMPDIR)
+        except OSError as e:
+            warning('Error creating temporary file: {0}'.format(e))
+            return bottle.HTTPResponse(status=403)
+        fd.write(crt_data)
+        fd.close()
+
+        # Revoke the certificate
+        ca.revoke(fd.name)
+
+        # Close the file descriptor towards the temporary certificate
+        os.unlink(fd.name)
+
+        info('Revoked the certificate for {0}'.format(fqdn))
+
+    def run(self):
+        """ run:    Start the CA service
+        """
+        try:
+            self._app.run(host=self._host, port=self._port, fast=True)
+        except socket.error as e:
+            error('Validator failed to start: {0}'.format(e))
+
+
+if __name__ == '__main__':
+    """ Main program to run
+    """
+    # Parse CLI arguments
+    parser = argparse.ArgumentParser(description=__description__)
+    parser.add_argument('-d', dest='debug', action='store_true',
+                        default=_d_debug, help='Enable debugging')
+    parser.add_argument('-f', dest='cfgfile', action='store',
+                        type=str, default=_d_cfgfile,
+                        help='Configuration file to use ({0})'.format(
+                            _d_cfgfile
+                        ))
+    parser.add_argument('-w', dest='workspace', action='store',
+                        help='Override location where to store data')
+    parser.add_argument('-l', dest='host', action='store',
+                        type=str, default=_d_host,
+                        help='Ip address on which to bind the PKI service')
+    parser.add_argument('-p', dest='port', action='store',
+                        type=int, default=_d_port,
+                        help='Port on which to bind the PKI service')
+    args = parser.parse_args()
+
+    # Initialize debug logging
+    enable_debug = args.debug
+
+    # Exit if configuration file does not exist
+    if not os.path.exists(args.cfgfile):
+        error('{0} does not exist'.format(args.cfgfile))
+
+    # All green, proceed with the program
+    debug('Using configuration from {0}'.format(args.cfgfile))
+    debug('Using {0} as a workspace'.format(args.workspace))
+
+    # Setup a restrictive umask
+    old_umask = os.umask(0o027)
+
+    # Load configuration yaml
+    raw_cfg = open(args.cfgfile, 'r').read()
+    config = yaml.safe_load(raw_cfg)
+    config['common'].update(config['autosign'])
+
+    # Override configured workspace if needed
+    config['common']['workspace'] = os.path.abspath(args.workspace)
+
+    # Check if workspace directory exists
+    if not os.path.exists(config['common']['workspace']):
+        warning('Creating {0}'.format(config['common']['workspace']))
+        os.mkdir(config['common']['workspace'])
+
+    ca = AutosignCA(config)
+    api = AutosignAPI(host=args.host, port=args.port)
+    api.run()
+
+    # Restore original umask
+    os.umask(old_umask)
