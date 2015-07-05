@@ -1,0 +1,402 @@
+#!/usr/bin/env python2
+
+import argparse
+import os
+import pprint
+import shlex
+import subprocess
+import sys
+import time
+
+
+# Handle external dependencies
+try:
+    import mako.template
+except ImportError:
+    print('Failed to import mako, please run "pip install mako"')
+    sys.exit(1)
+
+try:
+    import yaml
+except ImportError:
+    print('Failed to import PyYaml, please run "pip install pyyaml"')
+    sys.exit(1)
+
+
+# Set module details
+__description__ = 'AS65342 PKI -- Server component'
+__version__ = 0.1
+__author__ = 'Lex van Roon'
+__email__ = 'r3boot@r3blog.nl'
+__url__ = 'https://gitlab.as65342.net/r3boot/pki'
+
+# Distinguis various certs (temp?)
+CA_ROOT = 'root'
+CA_INTERMEDIARY = 'intermediary'
+CA_AUTOSIGN = 'autosign'
+
+
+# Various default values used as CLI arguments
+_d_debug = False
+_d_cfgfile = '/etc/pki/server.yml'
+_d_workspace = '/etc/pki'
+_d_host = 'localhost'
+_d_port = 4392
+
+
+# Setup debugging
+enable_debug = _d_debug
+
+
+def fpath(name):
+    """ fpath:      Helper function which converts a unix path to an openvms
+                    path.
+
+    @param:     name    String containing the unix path to convert
+    @return:    str     Translated path if running under vms, else name
+    """
+    if os.uname()[0] != 'OpenVMS':
+        return name
+    t = name.split('/')[1:]
+    device = t[0]
+    path = '.'.join(t[1:len(t)-1])
+    fname = t[len(t)-1]
+    return '{0}:[{1}]{2}'.format(device, path, fname)
+
+
+def fhost(name):
+    """ fhost:      Helper function which converts a dotted hostname to a
+                    underscore-based hostname to be used under openvms
+
+    @param:     name    String containing the hostname to convert
+    @return:    str     Translated hostname if running under vms, else name
+    """
+    return name.replace('.', '_')
+
+
+def run(cmd, stdin=False, stdout=False):
+    """ run:        Wrapper around subprocess.Popen to setup the various FDs
+
+    @param:     stdin   If True, make stdin a PIPE, else None
+    @param:     stdout  If True, make stdout a PIPE, else None
+    @return:    proc    Object containing the Popen result
+    """
+    cmd = shlex.split(cmd)
+
+    stdin_fd = None
+    if stdin:
+        stdin_fd = subprocess.PIPE
+
+    stdout_fd = None
+    if stdout:
+        stdout_fd = subprocess.PIPE
+
+    return subprocess.Popen(cmd, stdin=stdin_fd, stdout=stdout_fd)
+
+
+def print_message(prefix, message):
+    """ print_message:      Prints a message on the screen using a prefix
+
+    @param:     prefix      Prefix to use
+    @param:     message     Message to display
+    """
+    print('{0} {1}'.format(prefix, message))
+
+
+def info(message):
+    """ info:           Display an informational message
+
+    @param:     message Message to display
+    """
+    print_message('[+]', message)
+
+
+def warning(message):
+    """ warning:    Display a warning message
+
+    @param:     message Message to display
+    """
+    print_message('[W]', message)
+
+
+def debug(message):
+    """ warning:    Display a debug message if debugging is enabled
+
+    @param:     message Message to display
+    """
+    if not enable_debug:
+        return
+    print_message('[D]', message)
+
+
+def dump(obj):
+    """ dump:       Print anything using pprint
+
+    @param:     obj Anything that pprint will display
+    """
+    pprint.pprint(obj)
+
+def error(message):
+    """ warning:    Display an error message and exit the application
+
+    @param:     message Message to display
+    """
+    print_message('[E]', message)
+    sys.exit(1)
+
+
+class CA:
+    """ CA:     Class representing a Certificate Authority
+    """
+    ca_type = None
+    ca = {}
+
+    def __init__(self, config, name=None, days=3652):
+        self.cfg = config
+        if not name:
+            name = '{0}-{1}'.format(self.cfg['common']['name'], self.ca_type)
+
+        basedir = '{0}/{1}'.format(self.cfg['common']['workspace'], name)
+
+        if not self.ca_type:
+            error('ca_type not defined')
+
+        self.ca = {
+            'name': name,
+            'type': self.ca_type,
+            'workspace': self.cfg['common']['workspace'],
+            'basedir': basedir,
+            'baseurl': self.cfg['common']['baseurl'],
+            'cfg': fpath('{0}/cfg/{1}.cfg'.format(basedir, fhost(name))),
+            'csr': fpath('{0}/csr/{1}.csr'.format(basedir, fhost(name))),
+            'crl': fpath('{0}/crl/{1}.crl'.format(basedir, fhost(name))),
+            'key': fpath('{0}/private/{1}.key'.format(basedir, fhost(name))),
+            'crt': fpath('{0}/certs/{1}.pem'.format(basedir, fhost(name))),
+            'days': 60*60*24*days,
+            'db': fpath('{0}/db/{1}.db'.format(basedir, fhost(name))),
+            'db_attr': fpath('{0}/db/{1}-db.attr'.format(basedir, fhost(name))),
+            'crt_idx': fpath('{0}/db/{1}-crt.idx'.format(basedir, fhost(name))),
+            'crl_idx': fpath('{0}/db/{1}-crl.idx'.format(basedir, fhost(name))),
+        }
+        self.name = name
+        self.basedir = os.path.abspath(basedir)
+        self.ca_directories = ['certs', 'cfg', 'crl', 'csr', 'db', 'private']
+
+    def full_path(fname):
+        return fpath(os.path.abspath(fname))
+
+    def gen_enddate(self):
+        return time.strftime('%Y%m%d%H%M%SZ', time.localtime(time.time() + self.ca['days']))
+
+    def setup(self, ca_data={}):
+        info('Setup directories for {0} CA'.format(self.ca['name']))
+
+        if os.path.exists(self.ca['basedir']):
+            error('{0} already exists'.format(self.ca['basedir']))
+        os.mkdir(self.ca['basedir'])
+
+        for directory in self.ca_directories:
+            fdir = '{0}/{1}'.format(self.ca['basedir'], directory)
+            if not os.path.exists(fdir):
+                info('Creating {0}/{1}'.format(self.ca['name'], directory))
+                os.mkdir(fdir)
+
+        info('Initialize databases for {0} CA'.format(self.ca['name']))
+        for empty_file in [self.ca['db'], self.ca['db_attr']]:
+            open(empty_file, 'w').write('')
+
+        for serial_file in [self.ca['crt_idx'], self.ca['crl_idx']]:
+            open(serial_file, 'w').write('01\n')
+
+        info('Installing openssl configuration file for {0} CA'.format(self.ca['name']))
+        src_template = '{0}/templates/root_cfg.template'.format(self.ca['workspace'])
+        cfgfile = '{0}/cfg/{1}.cfg'.format(self.ca['basedir'], self.ca['name'])
+        if not os.path.exists(src_template):
+            error('{0} does not exist'.format(src_template))
+
+        cfg = {}
+        cfg.update(self.cfg['common'])
+
+        if self.ca_type in [CA_AUTOSIGN]:
+            cfg.update(ca_data)
+        else:
+            cfg.update(self.cfg[self.ca_type])
+
+        cfg['crypto'] = self.cfg['crypto']
+        cfg['basedir'] = '{0}/{1}'.format(self.ca['workspace'], self.name)
+        cfg['ca_type'] = self.ca_type
+        cfg['name'] = self.name
+        cfg['ca'] = self.ca
+
+        template_data = open(src_template, 'r').read()
+        template = mako.template.Template(template_data)
+        cfg_data = template.render(**cfg)
+        open(cfgfile, 'w').write('{0}\n'.format(cfg_data))
+
+    def initca(self):
+        warning('Feature not implemented')
+
+    def updatecrl(self):
+        cfg = '{0}/cfg/{1}.cfg'.format(self.ca['basedir'], self.ca['name'])
+        crl = '{0}/crl/{1}.crl'.format(self.ca['basedir'], self.ca['name'])
+
+        info('Generating crl for {0} CA'.format(self.ca['name']))
+        cmdline = 'openssl ca -gencrl -config {0} -out {1}'.format(
+            fpath(self.ca['cfg']),
+            fpath(self.ca['crl']),
+        )
+        os.chdir(self.basedir)
+        proc = run(cmdline)
+        proc.communicate()
+
+    def sign_intermediary(self, csr, crt):
+        print('\n')
+        info('Signing certificate using {0} CA'.format(self.ca['name']))
+        cmdline = 'openssl ca -config {0} -in {1} -out {2} -extensions intermediate_ca_ext -enddate {3}'.format(
+            fpath(self.ca['cfg']),
+            fpath(csr),
+            fpath(crt),
+            self.gen_enddate()
+        )
+        os.chdir(self.basedir)
+        proc = run(cmdline, stdout=True)
+        proc.communicate()
+
+
+class RootCA(CA):
+    ca_type = CA_ROOT
+    ca = {}
+
+    def __init__(self, config):
+        CA.__init__(self, config)
+
+    def initca(self):
+        print('\n')
+        info('Generating key and csr for {0} CA'.format(self.ca['name']))
+        cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
+            self.ca['cfg'], self.ca['csr'], self.ca['key'])
+        dump(self.ca)
+        os.chdir(self.basedir)
+        proc = run(cmdline, stdout=True)
+        proc.communicate()
+
+        print('\n')
+        info('Generating certificate for {0} CA'.format(self.ca['name']))
+        cmdline = 'openssl ca -selfsign -config {0} -in {1} -out {2} -extensions root_ca_ext -enddate {3}'.format(self.ca['cfg'], self.ca['csr'], self.ca['crt'], self.gen_enddate())
+        os.chdir(self.basedir)
+        proc = run(cmdline, stdout=True)
+        proc.communicate()
+
+
+class IntermediaryCA(CA):
+    ca_type = CA_INTERMEDIARY
+    ca = {}
+
+    def __init__(self, config):
+        CA.__init__(self, config)
+
+    def initca(self, parent=None):
+        if not parent:
+            error('initca needs a parent CA')
+        print('\n')
+        info('Generating key and csr for {0} CA'.format(self.ca['name']))
+        cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
+            self.ca['cfg'], self.ca['csr'], self.ca['key'])
+        os.chdir(self.basedir)
+        proc = run(cmdline, stdout=True)
+        proc.communicate()
+
+        print('\n')
+        info('Generating certificate for {0} CA'.format(self.ca['name']))
+        parent.sign_intermediary(self.ca['csr'], self.ca['crt'])
+
+
+class AutosignCA(CA):
+    ca_type = CA_AUTOSIGN
+    ca = {}
+
+    def __init__(self, config, name=None):
+        if not name:
+            error('No name supplied to class')
+        CA.__init__(self, config, name=name)
+
+    def initca(self, parent=None):
+        if not parent:
+            error('initca needs a parent CA')
+        print('\n')
+        info('Generating key and csr for {0} CA'.format(self.ca['name']))
+        cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
+            self.ca['cfg'], self.ca['csr'], self.ca['key'])
+        os.chdir(self.basedir)
+        proc = run(cmdline, stdout=True)
+        proc.communicate()
+
+        print('\n')
+        info('Generating certificate for {0} CA'.format(self.ca['name']))
+        parent.sign_intermediary(self.ca['csr'], self.ca['crt'])
+
+
+if __name__ == '__main__':
+    # Parse CLI arguments
+    parser = argparse.ArgumentParser(description=__description__)
+    parser.add_argument('-D', dest='debug', action='store_true',
+        default=_d_debug, help='Enable debugging')
+    parser.add_argument('-f', dest='cfgfile', action='store',
+        type=str, default=_d_cfgfile,
+        help='Configuration file to use ({0})'.format(_d_cfgfile))
+    parser.add_argument('-w', dest='workspace', action='store',
+        help='Override location where to store data')
+    parser.add_argument('-l', dest='host', action='store',
+        type=str, default=_d_host,
+        help='Ip address on which to bind the PKI service')
+    parser.add_argument('-p', dest='port', action='store',
+        type=int, default=_d_port,
+        help='Port on which to bind the PKI service')
+    args = parser.parse_args()
+
+    # Initialize debug logging
+    enable_debug = args.debug
+
+    # Exit if configuration file does not exist
+    if not os.path.exists(args.cfgfile):
+        error('{0} does not exist'.format(args.cfgfile))
+
+    # All green, proceed with the program
+    debug('Using configuration from {0}'.format(args.cfgfile))
+    debug('Using {0} as a workspace'.format(args.workspace))
+
+    # Setup a restrictive umask
+    old_umask = os.umask(0o027)
+
+    # Load configuration yaml
+    raw_cfg = open(args.cfgfile, 'r').read()
+    config = yaml.safe_load(raw_cfg)
+
+    # Override configured workspace if needed
+    config['common']['workspace'] = os.path.abspath(args.workspace)
+
+    # Check if workspace directory exists
+    if not os.path.exists(config['common']['workspace']):
+        warning('Creating {0}'.format(config['common']['workspace']))
+        os.mkdir(config['common']['workspace'])
+
+    root = RootCA(config)
+    root.setup()
+    root.initca()
+    root.updatecrl()
+
+    intermediary = IntermediaryCA(config)
+    intermediary.setup()
+    intermediary.initca(parent=root)
+    intermediary.updatecrl()
+
+    autosign_cas = {}
+    for ca in config['autosign']:
+        name = '{0}-{1}-autosign'.format(config['common']['name'], ca['name'])
+        autosign_cas[name] = AutosignCA(config, name=name)
+        autosign_cas[name].setup(ca_data=ca)
+        autosign_cas[name].initca(parent=intermediary)
+        autosign_cas[name].updatecrl()
+
+    # Restore original umask
+    os.umask(old_umask)

@@ -1,9 +1,10 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 
 import argparse
 import hashlib
 import json
 import os
+import platform
 import shlex
 import socket
 import subprocess
@@ -112,7 +113,7 @@ def debug(message):
 
     @param:     message Message to display
     """
-    if not debug:
+    if not enable_debug:
         return
     print_message('[D]', message)
 
@@ -451,6 +452,12 @@ if __name__ == '__main__':
 
     # Setup logging
     enable_debug = args.debug
+
+    # Display the platform we're running on
+    debug('Running under Python {0} on {1}'.format(
+        platform.python_version(),
+        os.uname()[0]
+    ))
 
     # Exit if an operation is specified, and if it's valid
     operation = args.operation[0]
