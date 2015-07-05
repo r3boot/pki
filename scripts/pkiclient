@@ -1,11 +1,9 @@
 #!/usr/bin/env python2
 
-from Crypto.Hash import SHA256
-
 import argparse
+import hashlib
 import json
 import os
-import requests
 import shlex
 import socket
 import subprocess
@@ -27,6 +25,13 @@ try:
     import mako.template
 except ImportError:
     print('Failed to import mako, please run "pip install mako"')
+    sys.exit(1)
+
+
+try:
+    import requests
+except ImportError:
+    print('Failed to import requests, please run "pip install requests"')
     sys.exit(1)
 
 try:
@@ -276,7 +281,7 @@ class APIClient:
             ))
 
         info('Got certificate for {0}'.format(fqdn))
-        open(crt, 'w').write(response['content'])
+        open(crt, 'w').write(response['content'].decode('utf-8'))
 
     def revoke(self, fqdn):
         """ revoke:     Request a certificate to be revoked
@@ -356,8 +361,8 @@ class ValidatorAPI(threading.Thread):
         self._app = bottle.Bottle()
         self._server = ManagedWSGIServer(host=host, port=port)
         self._app.route('/validate', method='GET', callback=self.serve_token)
-        sha = SHA256.new()
-        sha.update(str(random.random()))
+        sha = hashlib.sha256()
+        sha.update(str(random.random()).encode('utf-8'))
         self.token = sha.hexdigest()
 
         threading.Thread.__init__(self)
@@ -394,7 +399,7 @@ class ValidatorAPI(threading.Thread):
             elif r and r.status_code != 200:
                 error('Unknown return code received from pki')
             else:
-                cfg_data = r.content
+                cfg_data = r.content.decode('utf-8')
 
         info('Received new token, writing configuration to {0}'.format(
             cfg_file
