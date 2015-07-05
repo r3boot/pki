@@ -152,11 +152,15 @@ class CA:
     ca_type = None
     ca = {}
 
-    def __init__(self, config, name=None, days=3652):
-        self.cfg = config
-        if not name:
-            name = '{0}-{1}'.format(self.cfg['common']['name'], self.ca_type)
+    def __init__(self, config, days=3652):
+        """ __init__:   Initializes CA class
 
+        @param:     config  Dictionary containing the contents of the
+                            configuration file
+        @param:     days    Number of days the CA certificate will be valid
+        """
+        self.cfg = config
+        name = '{0}-{1}'.format(self.cfg['common']['name'], self.ca_type)
         basedir = '{0}/{1}'.format(self.cfg['common']['workspace'], name)
 
         if not self.ca_type:
@@ -183,14 +187,25 @@ class CA:
         self.basedir = os.path.abspath(basedir)
         self.ca_directories = ['certs', 'cfg', 'crl', 'csr', 'db', 'private']
 
-    def full_path(fname):
+    def full_path(self, fname):
+        """ full_path:  Helper function to return a full path on unix or vms
+
+        @param:     fname   Filename to return the full path for
+        @return:    str     String containing the full path to the file
+        """
         return fpath(os.path.abspath(fname))
 
     def gen_enddate(self):
+        """ gen_enddate:    Helper function to generate an enddate timestamp
+
+        @returns:   str String containing the timestamp
+        """
         future_date = time.localtime(time.time() + self.ca['days'])
         return time.strftime('%Y%m%d%H%M%SZ', future_date)
 
-    def setup(self, ca_data={}):
+    def setup(self):
+        """ setup:  Initialize the file structure for this CA
+        """
         info('Setup directories for {0} CA'.format(self.ca['name']))
 
         if os.path.exists(self.ca['basedir']):
@@ -223,10 +238,7 @@ class CA:
         cfg = {}
         cfg.update(self.cfg['common'])
 
-        if self.ca_type in [CA_AUTOSIGN]:
-            cfg.update(ca_data)
-        else:
-            cfg.update(self.cfg[self.ca_type])
+        cfg.update(self.cfg[self.ca_type])
 
         cfg['crypto'] = self.cfg['crypto']
         cfg['basedir'] = '{0}/{1}'.format(self.ca['workspace'], self.name)
@@ -240,9 +252,13 @@ class CA:
         open(cfgfile, 'w').write('{0}\n'.format(cfg_data))
 
     def initca(self):
+        """ initca      Empty function to be implemented by subclasses
+        """
         warning('Feature not implemented')
 
     def updatecrl(self):
+        """ updatecrl   Update the Certificate Revocation List for this CA
+        """
         info('Generating crl for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl ca -gencrl -config {0} -out {1}'.format(
             fpath(self.ca['cfg']),
@@ -253,7 +269,11 @@ class CA:
         proc.communicate()
 
     def sign_intermediary(self, csr, crt):
-        print('\n')
+        """ sign_intermediary:  Perform a intermediary certificate signing
+
+        @param:     csr Path to the Certificate Signing Request
+        @param:     crt Path to the output certificate
+        """
         info('Signing certificate using {0} CA'.format(self.ca['name']))
         cmdline = 'openssl ca -config {0} -in {1} -out {2}'.format(
             fpath(self.ca['cfg']),
@@ -269,17 +289,25 @@ class CA:
 
 
 class RootCA(CA):
+    """ RootCA:     Class implementing the root CA
+    """
     ca_type = CA_ROOT
     ca = {}
 
     def __init__(self, config):
+        """ __init__:       Initialize RootCA class
+
+        @param:     config  Dictionary containing the contents of the
+                            configuration file
+        """
         CA.__init__(self, config)
 
     def initca(self):
+        """ initca:     Generate the key and certificate for this CA
+        """
         info('Generating key and csr for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
             self.ca['cfg'], self.ca['csr'], self.ca['key'])
-        dump(self.ca)
         os.chdir(self.basedir)
         proc = run(cmdline, stdout=True)
         proc.communicate()
@@ -299,16 +327,27 @@ class RootCA(CA):
 
 
 class IntermediaryCA(CA):
+    """ IntermediaryCA:     Class implementing the intermediary CA
+    """
     ca_type = CA_INTERMEDIARY
     ca = {}
 
     def __init__(self, config):
+        """ __init__:       Initializes IntermediaryCA class
+
+        @param:     config  Dictionary containing the contents of the
+                            configuration file
+        """
         CA.__init__(self, config)
 
     def initca(self, parent=None):
+        """ initca:     Generate the intermediary key and sign it with the
+                        parent's key
+
+        @param:     parent  CA object containing the RootCA
+        """
         if not parent:
             error('initca needs a parent CA')
-        print('\n')
         info('Generating key and csr for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
             self.ca['cfg'], self.ca['csr'], self.ca['key'])
@@ -316,24 +355,32 @@ class IntermediaryCA(CA):
         proc = run(cmdline, stdout=True)
         proc.communicate()
 
-        print('\n')
         info('Generating certificate for {0} CA'.format(self.ca['name']))
         parent.sign_intermediary(self.ca['csr'], self.ca['crt'])
 
 
 class AutosignCA(CA):
+    """ AutosignCA:     Class implementing the autosign CA
+    """
     ca_type = CA_AUTOSIGN
     ca = {}
 
-    def __init__(self, config, name=None):
-        if not name:
-            error('No name supplied to class')
-        CA.__init__(self, config, name=name)
+    def __init__(self, config):
+        """ __init__:   Initializes the AutosignCA class
+
+        @param:     config  Dictionary containing the contents of the
+                            configuration file
+        """
+        CA.__init__(self, config)
 
     def initca(self, parent=None):
+        """ initca:     Generate the key for this CA and sign it with the
+                        parents key
+
+        @param:     parent  CA object containing the Intermediary CA
+        """
         if not parent:
             error('initca needs a parent CA')
-        print('\n')
         info('Generating key and csr for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
             self.ca['cfg'], self.ca['csr'], self.ca['key'])
@@ -341,12 +388,13 @@ class AutosignCA(CA):
         proc = run(cmdline, stdout=True)
         proc.communicate()
 
-        print('\n')
         info('Generating certificate for {0} CA'.format(self.ca['name']))
         parent.sign_intermediary(self.ca['csr'], self.ca['crt'])
 
 
 if __name__ == '__main__':
+    """ Main program to run
+    """
     # Parse CLI arguments
     parser = argparse.ArgumentParser(description=__description__)
     parser.add_argument('-d', dest='debug', action='store_true',
@@ -402,13 +450,10 @@ if __name__ == '__main__':
     intermediary.initca(parent=root)
     intermediary.updatecrl()
 
-    autosign_cas = {}
-    for ca in config['autosign']:
-        name = '{0}-{1}-autosign'.format(config['common']['name'], ca['name'])
-        autosign_cas[name] = AutosignCA(config, name=name)
-        autosign_cas[name].setup(ca_data=ca)
-        autosign_cas[name].initca(parent=intermediary)
-        autosign_cas[name].updatecrl()
+    autosign = AutosignCA(config)
+    autosign.setup()
+    autosign.initca(parent=intermediary)
+    autosign.updatecrl()
 
     # Restore original umask
     os.umask(old_umask)
