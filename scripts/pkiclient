@@ -1,18 +1,22 @@
 #!/usr/bin/env python2
 
+from Crypto.Hash    import SHA256
+
 import argparse
+import bottle
+import json
+import mako.template
 import os
+import requests
+import shlex
 import socket
+import subprocess
 import sys
+import re
+import random
+import threading
 import time
 import yaml
-
-sys.path.append('.')
-
-from pki.logging    import *
-from pki.validation import *
-from pki.validator.service  import ValidatorAPI
-from pki            import apiclient
 
 __description__ = 'AS65342 PKI -- Client component'
 
@@ -24,8 +28,79 @@ _d_workspace = '/etc/pki'
 _d_x509 = '/etc/ssl'
 _d_vhost = None
 
+enable_debug = _d_debug
+
+def run(cmd, stdin=False, stdout=False):
+    """ run:        Wrapper around subprocess.Popen to setup the various FDs
+
+    @param:     stdin   If True, make stdin a PIPE, else None
+    @param:     stdout  If True, make stdout a PIPE, else None
+    @return:    proc    Object containing the Popen result
+    """
+    cmd = shlex.split(cmd)
+
+    stdin_fd = None
+    if stdin:
+        stdin_fd = subprocess.PIPE
+
+    stdout_fd = None
+    if stdout:
+        stdout_fd = subprocess.PIPE
+
+    return subprocess.Popen(cmd, stdin=stdin_fd, stdout=stdout_fd)
+
+
+def print_message(prefix, message):
+    """ print_message:      Prints a message on the screen using a prefix
+
+    @param:     prefix      Prefix to use
+    @param:     message     Message to display
+    """
+    print('{0} {1}'.format(prefix, message))
+
+
+def info(message):
+    """ info:           Display an informational message
+
+    @param:     message Message to display
+    """
+    print_message('[+]', message)
+
+
+def warning(message):
+    """ warning:    Display a warning message
+
+    @param:     message Message to display
+    """
+    print_message('[W]', message)
+
+
+def debug(message):
+    """ warning:    Display a debug message if debugging is enabled
+
+    @param:     message Message to display
+    """
+    if not debug:
+        return
+    print_message('[D]', message)
+
+
+def error(message):
+    """ warning:    Display an error message and exit the application 
+
+    @param:     message Message to display
+    """
+    print_message('[E]', message)
+    sys.exit(1)
+
 
 def fetch_new_token_and_config(hostname, args):
+    """ fetch_new_token_and_config: Helper function called during initialization
+                                    to fetch a configuration and token
+
+    @param:     hostname    Hostname for this system
+    @param:     args        argparse argument object
+    """
     if not args.url:
         error('Need a URL to connect to for initialization')
 
@@ -63,7 +138,291 @@ def fetch_new_token_and_config(hostname, args):
             os.mkdir(full_dir)
 
 
+class APIClient:
+    """ APIClient:      Class containing a set of methods to talk with the
+                        server-side component of the PKI infrastructure
+    """
+    def __init__(self, config):
+        """ __init__:   Initialize APIClient class
+
+        @param:     config  Dictionary containing the configuration data
+        """
+        self._cfg = config
+        self._api_base = config['api']['url']
+        self._s = requests.session()
+
+
+    def _serialize(self, data):
+        """ _serialize: Returns a serialized version of data
+
+        @param:     data    Variable to be serialized
+        @return:    str     String containing a JSONified version of data
+        """
+        return json.dumps(data)
+
+
+    def _request(self, method, path, payload={}):
+        """ _request:   Performs a http request with an optional payload
+
+        @param:     method  HTTP method to use (GET/POST/DELETE)
+        @param:     path    Path on the api to call
+        @param:     payload Dictionary containing the payload to send
+        @return:    dict    Dictionary containing the result from the request
+        """
+        response = {}
+        url = self._api_base + path
+        r = None
+        if payload:
+            payload = self._serialize(payload)
+        try:
+            if method == 'get':
+                r = self._s.get(url)
+            elif method == 'post':
+                r = self._s.post(url, data=payload)
+            elif method == 'delete':
+                r = self._s.delete(url, data=payload)
+            else:
+                error('Invalid request method')
+        except requests.exceptions.ConnectionError, e:
+            error(e)
+        finally:
+            if not r:
+                response = {'result': False, 'content': 'Unknown error'}
+            elif r.status_code == 200:
+                response = {'result': True, 'content': r.content}
+
+        return response
+
+
+    def get(self, path, payload={}):
+        """ get:    Wrapper around _request to perform a GET request
+
+        @param:     path    Path on the API to place the call on
+        @param:     payload Dictionary containing the payload
+        @returns:   dict    Dictionary containing the response of the request
+        """
+        return self._request('get', path, payload)
+
+
+    def post(self, path, payload={}):
+        """ post:   Wrapper around _request to perform a POST request
+
+        @param:     path    Path on the API to place the call on
+        @param:     payload Dictionary containing the payload
+        @returns:   dict    Dictionary containing the response of the request
+        """
+        return self._request('post', path, payload)
+
+
+    def delete(self, path, payload={}):
+        """ delete: Wrapper around _request to perform a DELETE request
+
+        @param:     path    Path on the API to place the call on
+        @param:     payload Dictionary containing the payload
+        @returns:   dict    Dictionary containing the response of the request
+        """
+        return self._request('delete', path, payload)
+
+
+    def initialize_client(self, fqdn, token):
+        """ initialize_client:  Retrieve a new token and configuration file
+
+        @param:     fqdn    Fully-Qualified Domain-Name for this host
+        @param:     token   Initial installation token to use
+        """
+        path = '/token/{0}'.format(fqdn)
+        payload = {
+            'token': token,
+        }
+        info('Sending request for new token')
+        response = self.post(path, payload=payload)
+        if not response['result']:
+            error('Failed to retrieve a token: {0}'.format(response['content']))
+        debug('Received new token, writing configuration')
+        cfg_data = response['content']
+        cfg_file = '{0}/client.yml'.format(self._cfg['workspace'])
+        open(cfg_file, 'w').write('{0}\n'.format(cfg_data))
+
+
+    def new_server_cert(self, fqdn, vhost=False):
+        """ new_server_cert:    Request a new signed certificate
+
+        @param:     fqdn    Fully-Qualified Domain-Name to request a cert for
+        @param:     vhost   If True, this is a request for a vhost instead of
+                            the fqdn for this host
+        """
+        san = fqdn.split('.')[0]
+        path = '/autosign/servers'
+        key = '{0}/private/{1}.key'.format(self._cfg['x509'], fqdn)
+        cfg = '{0}/cfg/{1}.cfg'.format(self._cfg['x509'], fqdn)
+        csr = '{0}/csr/{1}.csr'.format(self._cfg['x509'], fqdn)
+        crt = '{0}/certs/{1}.pem'.format(self._cfg['x509'], fqdn)
+
+        if vhost:
+            template_file = '{0}/templates/tls-vhost-request_cfg.template'.format(self._cfg['workspace'])
+        else:
+            template_file = '{0}/templates/tls-server-request_cfg.template'.format(self._cfg['workspace'])
+        template_data = open(template_file, 'r').read()
+        template = mako.template.Template(template_data)
+        cfg_data = template.render(fqdn=fqdn, san=san, certs=self._cfg['certs'])
+        open(cfg, 'w').write(cfg_data)
+
+        info('Generating key and csr for {0}'.format(fqdn))
+        cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format('{0}/cfg/{1}.cfg'.format(self._cfg['workspace'], fqdn), csr, key)
+        proc = run(cmdline)
+        proc.communicate()
+
+        info('Sending csr to {0}'.format(self._cfg['api']['url']))
+        csr_data = open(csr, 'r').read()
+        payload = {
+            'fqdn': fqdn,
+            'hostname': socket.gethostname(),
+            'csr': csr_data,
+            'token': self._cfg['api']['token'],
+        }
+        response = self.post(path, payload=payload)
+        if not response['result']:
+            error('Failed to retrieve a certificate: {0}'.format(response['content']))
+
+        info('Got certificate for {0}'.format(fqdn))
+        open(crt, 'w').write(response['content'])
+
+
+    def revoke(self, fqdn):
+        """ revoke:     Request a certificate to be revoked
+
+        @param:     fqdn    Fully-Qualified Domain-Name to be revoked
+        """
+        path = '/autosign/servers'
+        crt = '{0}/certs/{1}.pem'.format(self._cfg['workspace'], fqdn)
+        if not os.path.exists(crt):
+            error('{0} does not exist'.format(crt))
+        crt_data = open(crt, 'r').read()
+
+        payload = {
+            'fqdn': fqdn,
+            'hostname': socket.gethostname(),
+            'crt': crt_data,
+            'token': self._cfg['api']['token'],
+        }
+        response = self.delete(path, payload=payload)
+        if not response['result']:
+            error('Failed to revoke certificate: {0}'.format(response['content']))
+
+        info('Revoked certificate for {0}'.format(fqdn))
+
+
+class ManagedWSGIServer(bottle.ServerAdapter):
+    """ ManagedWSGIServer:  Wrapper around WSGIRequestHandler so it can be
+                            stopped on request
+    """
+    server = None
+
+
+    def run(self, handler):
+        """ run:    Start the managed server
+
+        @param:     handler Object containing the handler for the http requests
+        """
+        from wsgiref.simple_server import make_server, WSGIRequestHandler
+        if self.quiet:
+            class QuietHandler(WSGIRequestHandler):
+                def log_request(*args, **kw): pass
+            self.options['handler_class'] = QuietHandler
+        self.server = make_server(self.host, self.port, handler, **self.options)
+        self.server.serve_forever()
+
+    def stop(self):
+        """ stop:   Stop the managed server
+        """
+        self.server.shutdown()
+
+
+class ValidatorAPI(threading.Thread):
+    """ ValidatorAPI:   Thread containing the client-side validator api
+    """
+
+    def __init__(self, host=None, port=None):
+        """ __init__:   Initialize the ValidatorAPI
+
+        @param:     host    IP address or host to bind api on
+        @param:     port    Port to bind api on
+        """
+        if not host:
+            error('ValidateAPI needs a listen ip')
+        self.host = host
+
+        if not port:
+            error('ValidateAPI needs a listen port')
+        self.port = port
+
+        self._app = bottle.Bottle()
+        self._server = ManagedWSGIServer(host=host, port=port)
+        self._app.route('/validate', method='GET', callback=self.serve_token)
+        sha = SHA256.new()
+        sha.update(str(random.random()))
+        self.token = sha.hexdigest()
+
+        threading.Thread.__init__(self)
+        self.setDaemon(True)
+
+
+    def serve_token(self):
+        """ serve_token:    Return the initial installation token
+
+        @return:    str     String containing the initial token
+        """
+        return self.token
+
+
+    def initialize_client(self, url, cfg_file, fqdn):
+        """ initialize_client:  Perform an initialization of this client
+                                by performing an http request to the server
+                                with a temporary token, and receiving a
+                                configuration file with a permanent token
+        @param:     url         URL on which the server can be found
+        @param:     cfg_file    Where to store the new configuration
+        @param:     fqdn        Fully-Qualified Domain-Name for this host
+        """
+        path = '{0}/token/{1}'.format(url, fqdn)
+        payload = json.dumps({ 'token': self.token, })
+        info('Sending request for new token')
+        r = None
+        cfg_data = None
+        try:
+            r = requests.post(path, data=payload)
+        except requests.exceptions.ConnectionError, e:
+            error(e)
+        finally:
+            if not r:
+                error('Unknown error trying to request a token')
+            elif r and r.status_code != 200:
+                error('Unknown return code received from pki')
+            else:
+                cfg_data = r.content
+
+        info('Received new token, writing configuration to {0}'.format(cfg_file))
+
+        open(cfg_file, 'w').write('{0}\n'.format(cfg_data))
+
+
+    def run(self):
+        """ run:    Start the local validator API
+        """
+        try:
+            self._app.run(server=self._server)
+        except socket.error, e:
+            error('Validator failed to start: {0}'.format(e))
+
+    def stop(self):
+        """ stop:   Stop the local validator API
+        """
+        self._server.stop()
+
+
 if __name__ == '__main__':
+    """ __main__:   Main program to execute
+    """
     ## Parse CLI arguments
     parser = argparse.ArgumentParser(description=__description__)
     parser.add_argument('-D', dest='debug', action='store_true',
@@ -88,7 +447,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     ## Setup logging
-    setup_logging(args.debug)
+    enable_debug = args.debug
 
     ## Exit if an operation is specified, and if it's valid
     operation = args.operation[0]
@@ -97,7 +456,7 @@ if __name__ == '__main__':
         print('')
         error('{0} is an invalid operation'.format(operation))
 
-    ## Exit if the fqdn does not match RFC1123
+    ## Setup the hostname and fqdn for the certificate request
     hostname = socket.gethostname()
     is_vhost = False
     if args.vhost:
@@ -106,7 +465,10 @@ if __name__ == '__main__':
     else:
         fqdn = hostname
 
-    if not valid_fqdn(fqdn):
+    ## Check if fqdn matches a valid rfc1123 hostname
+    r = re.compile('^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$')
+    result = r.search(fqdn)
+    if not result:
         error('{0} is not a valid fqdn'.format(fqdn))
 
     ## Setup a restrictive umask
@@ -120,7 +482,40 @@ if __name__ == '__main__':
 
     ## Request a new token + config file
     if not os.path.exists(args.cfgfile):
-        fetch_new_token_and_config(hostname, args)
+        info('No configuration found, requesting a new token and configuration')
+
+        ## Get the fqdn and prepare settings
+        host = socket.gethostbyname(hostname)
+        if host:
+            debug('Looked up ip as {0}'.format(host))
+        else:
+            error('Failed to lookup ptr record for {0}'.format(hostname))
+        port = 4393
+
+        ## Start the validator service
+        validator = ValidatorAPI(host=host, port=port)
+        info('Starting validator service')
+        validator.start()
+
+        ## Wait for validator service startup
+        time.sleep(0.5)
+
+        ## Receive a new tokenized configuration
+        validator.initialize_client(args.url, args.cfgfile, hostname)
+
+        info('Stopping validator service')
+        validator.stop()
+
+        ## Setup required directories
+        req_dirs = ['certs', 'cfg', 'crl', 'csr', 'private']
+        for directory in req_dirs:
+            full_dir = '{0}/{1}'.format(args.x509, directory)
+            if not os.path.exists(full_dir):
+                warning('Creating {0}'.format(full_dir))
+                try:
+                    os.mkdir(full_dir)
+                except OSError, e:
+                    error('Failed to create directory: {1}'.format(full_dir, e))
 
     ## Load the configuration yaml
     raw_cfg = open(args.cfgfile, 'r').read()
@@ -136,7 +531,7 @@ if __name__ == '__main__':
     debug('Using {0} as the x509 store'.format(args.x509))
     debug('Using {0} as the fqdn'.format(fqdn))
 
-    autosign = apiclient.APIClient(config)
+    autosign = APIClient(config)
     if operation == 'newcert':
         autosign.new_server_cert(fqdn, vhost=is_vhost)
     elif operation == 'revoke':

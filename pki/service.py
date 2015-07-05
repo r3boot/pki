@@ -122,7 +122,7 @@ def generate_token(fqdn):
     template_data = open(template_file, 'r').read()
     template = mako.template.Template(template_data)
     cfg_data = template.render(
-        server_host='10.42.15.17',
+        server_host='127.0.0.1',
         server_port=4392,
         client_token=token,
     )

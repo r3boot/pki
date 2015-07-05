@@ -7,3 +7,8 @@
 - Make paths absolute in root.cfg
 - Make sure templates are installed into workspace
 - Move pki/ dependencies into the various scripts
+- Un-fudge the various configuration dicts (self.ca, self.cfg, etc)
+
+### pkiclient
+- fetch_new_token_and_config -> make hostname based on socket.gethostname()
+- APIClient.new_server_cert -> Make vhost detection automagic
