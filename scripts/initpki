@@ -136,6 +136,7 @@ def dump(obj):
     """
     pprint.pprint(obj)
 
+
 def error(message):
     """ warning:    Display an error message and exit the application
 
@@ -167,16 +168,16 @@ class CA:
             'workspace': self.cfg['common']['workspace'],
             'basedir': basedir,
             'baseurl': self.cfg['common']['baseurl'],
-            'cfg': fpath('{0}/cfg/{1}.cfg'.format(basedir, fhost(name))),
-            'csr': fpath('{0}/csr/{1}.csr'.format(basedir, fhost(name))),
-            'crl': fpath('{0}/crl/{1}.crl'.format(basedir, fhost(name))),
-            'key': fpath('{0}/private/{1}.key'.format(basedir, fhost(name))),
-            'crt': fpath('{0}/certs/{1}.pem'.format(basedir, fhost(name))),
+            'cfg': fpath('{0}/cfg/{1}.cfg'.format(basedir, name)),
+            'csr': fpath('{0}/csr/{1}.csr'.format(basedir, name)),
+            'crl': fpath('{0}/crl/{1}.crl'.format(basedir, name)),
+            'key': fpath('{0}/private/{1}.key'.format(basedir, name)),
+            'crt': fpath('{0}/certs/{1}.pem'.format(basedir, name)),
             'days': 60*60*24*days,
-            'db': fpath('{0}/db/{1}.db'.format(basedir, fhost(name))),
-            'db_attr': fpath('{0}/db/{1}-db.attr'.format(basedir, fhost(name))),
-            'crt_idx': fpath('{0}/db/{1}-crt.idx'.format(basedir, fhost(name))),
-            'crl_idx': fpath('{0}/db/{1}-crl.idx'.format(basedir, fhost(name))),
+            'db': fpath('{0}/db/{1}.db'.format(basedir, name)),
+            'db_attr': fpath('{0}/db/{1}-db.attr'.format(basedir, name)),
+            'crt_idx': fpath('{0}/db/{1}-crt.idx'.format(basedir, name)),
+            'crl_idx': fpath('{0}/db/{1}-crl.idx'.format(basedir, name)),
         }
         self.name = name
         self.basedir = os.path.abspath(basedir)
@@ -186,7 +187,8 @@ class CA:
         return fpath(os.path.abspath(fname))
 
     def gen_enddate(self):
-        return time.strftime('%Y%m%d%H%M%SZ', time.localtime(time.time() + self.ca['days']))
+        future_date = time.localtime(time.time() + self.ca['days'])
+        return time.strftime('%Y%m%d%H%M%SZ', future_date)
 
     def setup(self, ca_data={}):
         info('Setup directories for {0} CA'.format(self.ca['name']))
@@ -208,8 +210,12 @@ class CA:
         for serial_file in [self.ca['crt_idx'], self.ca['crl_idx']]:
             open(serial_file, 'w').write('01\n')
 
-        info('Installing openssl configuration file for {0} CA'.format(self.ca['name']))
-        src_template = '{0}/templates/root_cfg.template'.format(self.ca['workspace'])
+        info('Installing openssl configuration file for {0} CA'.format(
+            self.ca['name']
+        ))
+        src_template = '{0}/templates/root_cfg.template'.format(
+            self.ca['workspace']
+        )
         cfgfile = '{0}/cfg/{1}.cfg'.format(self.ca['basedir'], self.ca['name'])
         if not os.path.exists(src_template):
             error('{0} does not exist'.format(src_template))
@@ -237,9 +243,6 @@ class CA:
         warning('Feature not implemented')
 
     def updatecrl(self):
-        cfg = '{0}/cfg/{1}.cfg'.format(self.ca['basedir'], self.ca['name'])
-        crl = '{0}/crl/{1}.crl'.format(self.ca['basedir'], self.ca['name'])
-
         info('Generating crl for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl ca -gencrl -config {0} -out {1}'.format(
             fpath(self.ca['cfg']),
@@ -252,10 +255,12 @@ class CA:
     def sign_intermediary(self, csr, crt):
         print('\n')
         info('Signing certificate using {0} CA'.format(self.ca['name']))
-        cmdline = 'openssl ca -config {0} -in {1} -out {2} -extensions intermediate_ca_ext -enddate {3}'.format(
+        cmdline = 'openssl ca -config {0} -in {1} -out {2}'.format(
             fpath(self.ca['cfg']),
             fpath(csr),
             fpath(crt),
+        )
+        cmdline += ' -extensions intermediate_ca_ext -enddate {0}'.format(
             self.gen_enddate()
         )
         os.chdir(self.basedir)
@@ -271,7 +276,6 @@ class RootCA(CA):
         CA.__init__(self, config)
 
     def initca(self):
-        print('\n')
         info('Generating key and csr for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
             self.ca['cfg'], self.ca['csr'], self.ca['key'])
@@ -280,9 +284,15 @@ class RootCA(CA):
         proc = run(cmdline, stdout=True)
         proc.communicate()
 
-        print('\n')
         info('Generating certificate for {0} CA'.format(self.ca['name']))
-        cmdline = 'openssl ca -selfsign -config {0} -in {1} -out {2} -extensions root_ca_ext -enddate {3}'.format(self.ca['cfg'], self.ca['csr'], self.ca['crt'], self.gen_enddate())
+        cmdline = 'openssl ca -selfsign -config {0} -in {1} -out {2}'.format(
+            self.ca['cfg'],
+            self.ca['csr'],
+            self.ca['crt'],
+        )
+        cmdline += ' -extensions root_ca_ext -enddate {0}'.format(
+            self.gen_enddate()
+        )
         os.chdir(self.basedir)
         proc = run(cmdline, stdout=True)
         proc.communicate()
@@ -340,18 +350,20 @@ if __name__ == '__main__':
     # Parse CLI arguments
     parser = argparse.ArgumentParser(description=__description__)
     parser.add_argument('-d', dest='debug', action='store_true',
-        default=_d_debug, help='Enable debugging')
+                        default=_d_debug, help='Enable debugging')
     parser.add_argument('-f', dest='cfgfile', action='store',
-        type=str, default=_d_cfgfile,
-        help='Configuration file to use ({0})'.format(_d_cfgfile))
+                        type=str, default=_d_cfgfile,
+                        help='Configuration file to use ({0})'.format(
+                            _d_cfgfile
+                        ))
     parser.add_argument('-w', dest='workspace', action='store',
-        help='Override location where to store data')
+                        help='Override location where to store data')
     parser.add_argument('-l', dest='host', action='store',
-        type=str, default=_d_host,
-        help='Ip address on which to bind the PKI service')
+                        type=str, default=_d_host,
+                        help='Ip address on which to bind the PKI service')
     parser.add_argument('-p', dest='port', action='store',
-        type=int, default=_d_port,
-        help='Port on which to bind the PKI service')
+                        type=int, default=_d_port,
+                        help='Port on which to bind the PKI service')
     args = parser.parse_args()
 
     # Initialize debug logging
