@@ -63,6 +63,70 @@ _d_vhost = None
 enable_debug = _d_debug
 
 
+# Template for a tls vhost request
+tls_vhost_template = """# TLS vhost certificate request for ${fqdn}
+
+[ default ]
+SAN                     = DNS:${fqdn}    # Default value
+
+[ req ]
+default_bits            = ${certs['bits']}                  # RSA key size
+encrypt_key             = no                    # Protect private key
+default_md              = ${certs['hash']}                  # MD to use
+utf8                    = yes                   # Input is UTF-8
+string_mask             = utf8only              # Emit UTF-8 strings
+prompt                  = no                   # Prompt for DN
+distinguished_name      = server_dn             # DN template
+req_extensions          = server_reqext         # Desired extensions
+
+[ server_dn ]
+CN                      = ${fqdn}
+C                       = ${certs['country']}
+ST                      = ${certs['province']}
+L                       = ${certs['city']}
+O                       = ${certs['organization']}
+OU                      = ${certs['unit']}
+
+[ server_reqext ]
+keyUsage                = critical,digitalSignature,keyEncipherment
+extendedKeyUsage        = serverAuth,clientAuth
+subjectKeyIdentifier    = hash
+subjectAltName          = DNS:${fqdn}
+"""
+
+
+# Template for a tls server request
+tls_server_template = """# TLS server certificate request for ${fqdn}
+
+[ default ]
+SAN                     = DNS:${fqdn}    # Default value
+
+[ req ]
+default_bits            = ${certs['bits']}                  # RSA key size
+encrypt_key             = no                    # Protect private key
+default_md              = ${certs['hash']}                  # MD to use
+utf8                    = yes                   # Input is UTF-8
+string_mask             = utf8only              # Emit UTF-8 strings
+prompt                  = no                   # Prompt for DN
+distinguished_name      = server_dn             # DN template
+req_extensions          = server_reqext         # Desired extensions
+
+[ server_dn ]
+CN                      = ${fqdn}
+C                       = ${certs['country']}
+ST                      = ${certs['province']}
+L                       = ${certs['city']}
+O                       = ${certs['organization']}
+OU                      = ${certs['unit']}
+
+[ server_reqext ]
+keyUsage                = critical,digitalSignature,keyEncipherment
+extendedKeyUsage        = serverAuth,clientAuth
+subjectKeyIdentifier    = hash
+subjectAltName          = DNS:${san}
+"""
+
+
 def run(cmd, stdin=False, stdout=False):
     """ run:        Wrapper around subprocess.Popen to setup the various FDs
 
@@ -244,14 +308,10 @@ class APIClient:
         crt = '{0}/certs/{1}.pem'.format(self._cfg['x509'], fqdn)
 
         if vhost:
-            tf = '{0}/templates/tls-vhost-request_cfg.template'.format(
-                self._cfg['workspace']
-            )
+            template_data = tls_vhost_template
         else:
-            tf = '{0}/templates/tls-server-request_cfg.template'.format(
-                self._cfg['workspace']
-            )
-        template_data = open(tf, 'r').read()
+            template_data = tls_server_template
+
         template = mako.template.Template(template_data)
         cfg_data = template.render(
             fqdn=fqdn,

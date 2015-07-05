@@ -6,7 +6,7 @@
 - Make paths absolute in root.cfg
 - Make sure templates are installed into workspace
 - Un-fudge the various configuration dicts (self.ca, self.cfg, etc)
-- Move templates into scripts
+- Make client.yml template more templated
 
 ### pkiclient
 - fetch_new_token_and_config -> make hostname based on socket.gethostname()

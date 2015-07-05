@@ -77,6 +77,25 @@ _subject_to_yaml = {
 ca = None
 
 
+# Template containing client.yml
+client_yml_template = """---
+# This file contains the configuration for a certificate client
+
+api:
+    url: http://${server_host}:${server_port}
+    token: ${client_token}
+
+certs:
+    bits: 4096
+    hash: sha512
+    country: NL
+    province: Utrecht
+    city: Amersfoort
+    organization: AS65342
+    unit: Autosign
+"""
+
+
 def fpath(name):
     """ fpath:      Helper function which converts a unix path to an openvms
                     path.
@@ -595,12 +614,6 @@ class AutosignAPI:
             return bottle.HTTPResponse(status=403, body='Not authenticated')
         fqdn = data['fqdn']
 
-        template_file = '{0}/templates/client_yml.template'.format(
-            ca.cfg['common']['workspace'])
-        if not os.path.exists(template_file):
-            warning('{0} does not exist'.format(template_file))
-            return bottle.HTTPResponse(status=501, body='Internal error')
-
         debug('Received new token request from {0}'.format(fqdn))
         req_token = data['token']
         if not ValidatorClient(fqdn).validate(req_token):
@@ -616,8 +629,7 @@ class AutosignAPI:
         tokens[fqdn] = token
         open(token_store, 'w').write(json.dumps(tokens))
 
-        template_data = open(template_file, 'r').read()
-        template = mako.template.Template(template_data)
+        template = mako.template.Template(client_yml_template)
         cfg_data = template.render(
             server_host='127.0.0.1',
             server_port=4392,
