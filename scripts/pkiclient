@@ -1,11 +1,9 @@
 #!/usr/bin/env python2
 
-from Crypto.Hash    import SHA256
+from Crypto.Hash import SHA256
 
 import argparse
-import bottle
 import json
-import mako.template
 import os
 import requests
 import shlex
@@ -16,11 +14,37 @@ import re
 import random
 import threading
 import time
-import yaml
 
+
+# Handle external dependencies
+try:
+    import bottle
+except ImportError:
+    print('Failed to import bottle, please run "pip install bottle"')
+    sys.exit(1)
+
+try:
+    import mako.template
+except ImportError:
+    print('Failed to import mako, please run "pip install mako"')
+    sys.exit(1)
+
+try:
+    import yaml
+except ImportError:
+    print('Failed to import PyYaml, please run "pip install pyyaml"')
+    sys.exit(1)
+
+
+# Set module details
 __description__ = 'AS65342 PKI -- Client component'
+__version__ = 0.1
+__author__ = 'Lex van Roon'
+__email__ = 'r3boot@r3blog.nl'
+__url__ = 'https://gitlab.as65342.net/r3boot/pki'
 
-## Various default values used as CLI arguments
+
+# Various default values used as CLI arguments
 _d_debug = False
 _d_url = 'http://127.0.0.1:4392'
 _d_cfgfile = '/etc/pki/client.yml'
@@ -28,7 +52,10 @@ _d_workspace = '/etc/pki'
 _d_x509 = '/etc/ssl'
 _d_vhost = None
 
+
+# Global flag used to indicate werther debugging is enabled
 enable_debug = _d_debug
+
 
 def run(cmd, stdin=False, stdout=False):
     """ run:        Wrapper around subprocess.Popen to setup the various FDs
@@ -86,56 +113,12 @@ def debug(message):
 
 
 def error(message):
-    """ warning:    Display an error message and exit the application 
+    """ warning:    Display an error message and exit the application
 
     @param:     message Message to display
     """
     print_message('[E]', message)
     sys.exit(1)
-
-
-def fetch_new_token_and_config(hostname, args):
-    """ fetch_new_token_and_config: Helper function called during initialization
-                                    to fetch a configuration and token
-
-    @param:     hostname    Hostname for this system
-    @param:     args        argparse argument object
-    """
-    if not args.url:
-        error('Need a URL to connect to for initialization')
-
-    ## Request a new token if this is a first-time installation
-    info('No configuration found, requesting a new token and configuration')
-
-    ## Get the fqdn and prepare settings
-    host = socket.gethostbyname(hostname)
-    if host:
-        debug('Looked up ip as {0}'.format(host))
-    else:
-        error('Failed to lookup ptr record for {0}'.format(hostname))
-    port = 4393
-
-    ## Start the validator service
-    validator = ValidatorAPI(host=host, port=port)
-    info('Starting validator service')
-    validator.start()
-
-    ## Wait for validator service startup
-    time.sleep(0.5)
-
-    ## Receive a new tokenized configuration
-    validator.initialize_client(args.url, args.cfgfile, hostname)
-
-    info('Stopping validator service')
-    validator.stop()
-
-    ## Setup required directories
-    req_dirs = ['certs', 'cfg', 'crl', 'csr', 'private']
-    for directory in req_dirs:
-        full_dir = '{0}/{1}'.format(args.x509, directory)
-        if not os.path.exists(full_dir):
-            warning('Creating {0}'.format(full_dir))
-            os.mkdir(full_dir)
 
 
 class APIClient:
@@ -151,7 +134,6 @@ class APIClient:
         self._api_base = config['api']['url']
         self._s = requests.session()
 
-
     def _serialize(self, data):
         """ _serialize: Returns a serialized version of data
 
@@ -159,7 +141,6 @@ class APIClient:
         @return:    str     String containing a JSONified version of data
         """
         return json.dumps(data)
-
 
     def _request(self, method, path, payload={}):
         """ _request:   Performs a http request with an optional payload
@@ -183,7 +164,7 @@ class APIClient:
                 r = self._s.delete(url, data=payload)
             else:
                 error('Invalid request method')
-        except requests.exceptions.ConnectionError, e:
+        except requests.exceptions.ConnectionError as e:
             error(e)
         finally:
             if not r:
@@ -192,7 +173,6 @@ class APIClient:
                 response = {'result': True, 'content': r.content}
 
         return response
-
 
     def get(self, path, payload={}):
         """ get:    Wrapper around _request to perform a GET request
@@ -203,7 +183,6 @@ class APIClient:
         """
         return self._request('get', path, payload)
 
-
     def post(self, path, payload={}):
         """ post:   Wrapper around _request to perform a POST request
 
@@ -213,7 +192,6 @@ class APIClient:
         """
         return self._request('post', path, payload)
 
-
     def delete(self, path, payload={}):
         """ delete: Wrapper around _request to perform a DELETE request
 
@@ -222,7 +200,6 @@ class APIClient:
         @returns:   dict    Dictionary containing the response of the request
         """
         return self._request('delete', path, payload)
-
 
     def initialize_client(self, fqdn, token):
         """ initialize_client:  Retrieve a new token and configuration file
@@ -237,12 +214,13 @@ class APIClient:
         info('Sending request for new token')
         response = self.post(path, payload=payload)
         if not response['result']:
-            error('Failed to retrieve a token: {0}'.format(response['content']))
+            error('Failed to retrieve a token: {0}'.format(
+                response['content'])
+            )
         debug('Received new token, writing configuration')
         cfg_data = response['content']
         cfg_file = '{0}/client.yml'.format(self._cfg['workspace'])
         open(cfg_file, 'w').write('{0}\n'.format(cfg_data))
-
 
     def new_server_cert(self, fqdn, vhost=False):
         """ new_server_cert:    Request a new signed certificate
@@ -259,16 +237,27 @@ class APIClient:
         crt = '{0}/certs/{1}.pem'.format(self._cfg['x509'], fqdn)
 
         if vhost:
-            template_file = '{0}/templates/tls-vhost-request_cfg.template'.format(self._cfg['workspace'])
+            tf = '{0}/templates/tls-vhost-request_cfg.template'.format(
+                self._cfg['workspace']
+            )
         else:
-            template_file = '{0}/templates/tls-server-request_cfg.template'.format(self._cfg['workspace'])
-        template_data = open(template_file, 'r').read()
+            tf = '{0}/templates/tls-server-request_cfg.template'.format(
+                self._cfg['workspace']
+            )
+        template_data = open(tf, 'r').read()
         template = mako.template.Template(template_data)
-        cfg_data = template.render(fqdn=fqdn, san=san, certs=self._cfg['certs'])
+        cfg_data = template.render(
+            fqdn=fqdn,
+            san=san,
+            certs=self._cfg['certs']
+        )
         open(cfg, 'w').write(cfg_data)
 
         info('Generating key and csr for {0}'.format(fqdn))
-        cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format('{0}/cfg/{1}.cfg'.format(self._cfg['workspace'], fqdn), csr, key)
+        cfg_file = '{0}/cfg/{1  }.cfg'.format(self._cfg['workspace'], fqdn)
+        cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
+            cfg_file, csr, key
+        )
         proc = run(cmdline)
         proc.communicate()
 
@@ -282,11 +271,12 @@ class APIClient:
         }
         response = self.post(path, payload=payload)
         if not response['result']:
-            error('Failed to retrieve a certificate: {0}'.format(response['content']))
+            error('Failed to retrieve a certificate: {0}'.format(
+                response['content']
+            ))
 
         info('Got certificate for {0}'.format(fqdn))
         open(crt, 'w').write(response['content'])
-
 
     def revoke(self, fqdn):
         """ revoke:     Request a certificate to be revoked
@@ -307,7 +297,9 @@ class APIClient:
         }
         response = self.delete(path, payload=payload)
         if not response['result']:
-            error('Failed to revoke certificate: {0}'.format(response['content']))
+            error('Failed to revoke certificate: {0}'.format(
+                response['content']
+            ))
 
         info('Revoked certificate for {0}'.format(fqdn))
 
@@ -317,7 +309,7 @@ class ManagedWSGIServer(bottle.ServerAdapter):
                             stopped on request
     """
     server = None
-
+    quiet = True
 
     def run(self, handler):
         """ run:    Start the managed server
@@ -329,7 +321,12 @@ class ManagedWSGIServer(bottle.ServerAdapter):
             class QuietHandler(WSGIRequestHandler):
                 def log_request(*args, **kw): pass
             self.options['handler_class'] = QuietHandler
-        self.server = make_server(self.host, self.port, handler, **self.options)
+        self.server = make_server(
+            self.host,
+            self.port,
+            handler,
+            **self.options
+        )
         self.server.serve_forever()
 
     def stop(self):
@@ -366,14 +363,12 @@ class ValidatorAPI(threading.Thread):
         threading.Thread.__init__(self)
         self.setDaemon(True)
 
-
     def serve_token(self):
         """ serve_token:    Return the initial installation token
 
         @return:    str     String containing the initial token
         """
         return self.token
-
 
     def initialize_client(self, url, cfg_file, fqdn):
         """ initialize_client:  Perform an initialization of this client
@@ -385,13 +380,13 @@ class ValidatorAPI(threading.Thread):
         @param:     fqdn        Fully-Qualified Domain-Name for this host
         """
         path = '{0}/token/{1}'.format(url, fqdn)
-        payload = json.dumps({ 'token': self.token, })
+        payload = json.dumps({'token': self.token})
         info('Sending request for new token')
         r = None
         cfg_data = None
         try:
             r = requests.post(path, data=payload)
-        except requests.exceptions.ConnectionError, e:
+        except requests.exceptions.ConnectionError as e:
             error(e)
         finally:
             if not r:
@@ -401,17 +396,18 @@ class ValidatorAPI(threading.Thread):
             else:
                 cfg_data = r.content
 
-        info('Received new token, writing configuration to {0}'.format(cfg_file))
+        info('Received new token, writing configuration to {0}'.format(
+            cfg_file
+        ))
 
         open(cfg_file, 'w').write('{0}\n'.format(cfg_data))
-
 
     def run(self):
         """ run:    Start the local validator API
         """
         try:
             self._app.run(server=self._server)
-        except socket.error, e:
+        except socket.error as e:
             error('Validator failed to start: {0}'.format(e))
 
     def stop(self):
@@ -423,40 +419,42 @@ class ValidatorAPI(threading.Thread):
 if __name__ == '__main__':
     """ __main__:   Main program to execute
     """
-    ## Parse CLI arguments
+    # Parse CLI arguments
     parser = argparse.ArgumentParser(description=__description__)
     parser.add_argument('-D', dest='debug', action='store_true',
-        default=_d_debug, help='Enable debugging')
+                        default=_d_debug, help='Enable debugging')
     parser.add_argument('-f', dest='cfgfile', action='store',
-        type=str, default=_d_cfgfile,
-        help='Configuration file to use ({0})'.format(_d_cfgfile))
+                        type=str, default=_d_cfgfile,
+                        help='Configuration file to use ({0})'.format(
+                            _d_cfgfile
+                        ))
     parser.add_argument('-u', dest='url', action='store',
-        type=str, default=_d_url,
-        help='API URL to use (during initialization)')
+                        type=str, default=_d_url,
+                        help='API URL to use (during initialization)')
     parser.add_argument('-w', dest='workspace', action='store',
-        type=str, default=_d_workspace,
-        help='Override location where to store configuration(s)')
+                        type=str, default=_d_workspace,
+                        help='Override location where to store configuration')
     parser.add_argument('-o', dest='x509', action='store',
-        type=str, default=_d_x509,
-        help='Override location where to store x509 data')
+                        type=str, default=_d_x509,
+                        help='Override location where to store x509 data')
     parser.add_argument('--vhost', dest='vhost', action='store',
-        type=str, default=_d_vhost,
-        help='Generate a certificate for a virtual host')
+                        type=str, default=_d_vhost,
+                        help='Generate a certificate for a virtual host')
     parser.add_argument('operation', nargs=1, type=str,
-        help='Operation to perform (newcert, revoke)')
+                        help='Operation to perform (newcert, revoke)')
     args = parser.parse_args()
 
-    ## Setup logging
+    # Setup logging
     enable_debug = args.debug
 
-    ## Exit if an operation is specified, and if it's valid
+    # Exit if an operation is specified, and if it's valid
     operation = args.operation[0]
     if operation not in ['newcert', 'revoke']:
         parser.print_help()
         print('')
         error('{0} is an invalid operation'.format(operation))
 
-    ## Setup the hostname and fqdn for the certificate request
+    # Setup the hostname and fqdn for the certificate request
     hostname = socket.gethostname()
     is_vhost = False
     if args.vhost:
@@ -465,26 +463,28 @@ if __name__ == '__main__':
     else:
         fqdn = hostname
 
-    ## Check if fqdn matches a valid rfc1123 hostname
-    r = re.compile('^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$')
+    # Check if fqdn matches a valid rfc1123 hostname
+    regexp = '^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*'
+    regexp += '([A-Za-z0-9]  |[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$'
+    r = re.compile(regexp)
     result = r.search(fqdn)
     if not result:
         error('{0} is not a valid fqdn'.format(fqdn))
 
-    ## Setup a restrictive umask
-    old_umask = os.umask(027)
+    # Setup a restrictive umask
+    old_umask = os.umask(0o027)
 
-    ## Check if workspace directory exists
+    # Check if workspace directory exists
     workspace = os.path.abspath(args.workspace)
     if not os.path.exists(workspace):
         warning('Creating {0}'.format(workspace))
         os.mkdir(workspace)
 
-    ## Request a new token + config file
+    # Request a new token + config file
     if not os.path.exists(args.cfgfile):
-        info('No configuration found, requesting a new token and configuration')
+        info('No configuration found, requesting new token and configuration')
 
-        ## Get the fqdn and prepare settings
+        # Get the fqdn and prepare settings
         host = socket.gethostbyname(hostname)
         if host:
             debug('Looked up ip as {0}'.format(host))
@@ -492,21 +492,21 @@ if __name__ == '__main__':
             error('Failed to lookup ptr record for {0}'.format(hostname))
         port = 4393
 
-        ## Start the validator service
+        # Start the validator service
         validator = ValidatorAPI(host=host, port=port)
         info('Starting validator service')
         validator.start()
 
-        ## Wait for validator service startup
+        # Wait for validator service startup
         time.sleep(0.5)
 
-        ## Receive a new tokenized configuration
+        # Receive a new tokenized configuration
         validator.initialize_client(args.url, args.cfgfile, hostname)
 
         info('Stopping validator service')
         validator.stop()
 
-        ## Setup required directories
+        # Setup required directories
         req_dirs = ['certs', 'cfg', 'crl', 'csr', 'private']
         for directory in req_dirs:
             full_dir = '{0}/{1}'.format(args.x509, directory)
@@ -514,18 +514,20 @@ if __name__ == '__main__':
                 warning('Creating {0}'.format(full_dir))
                 try:
                     os.mkdir(full_dir)
-                except OSError, e:
-                    error('Failed to create directory: {1}'.format(full_dir, e))
+                except OSError as e:
+                    error('Failed to create directory: {1}'.format(
+                        full_dir, e
+                    ))
 
-    ## Load the configuration yaml
+    # Load the configuration yaml
     raw_cfg = open(args.cfgfile, 'r').read()
     config = yaml.safe_load(raw_cfg)
 
-    ## Set workspace and x509 directory
+    # Set workspace and x509 directory
     config['workspace'] = workspace
     config['x509'] = args.x509
 
-    ## All green, proceed with the program
+    # All green, proceed with the program
     debug('Using configuration from {0}'.format(args.cfgfile))
     debug('Using {0} as the workspace'.format(workspace))
     debug('Using {0} as the x509 store'.format(args.x509))
@@ -537,5 +539,5 @@ if __name__ == '__main__':
     elif operation == 'revoke':
         autosign.revoke(fqdn)
 
-    ## Restore original umask
+    # Restore original umask
     os.umask(old_umask)
