@@ -339,7 +339,7 @@ class AutosignCA(CA):
 if __name__ == '__main__':
     # Parse CLI arguments
     parser = argparse.ArgumentParser(description=__description__)
-    parser.add_argument('-D', dest='debug', action='store_true',
+    parser.add_argument('-d', dest='debug', action='store_true',
         default=_d_debug, help='Enable debugging')
     parser.add_argument('-f', dest='cfgfile', action='store',
         type=str, default=_d_cfgfile,
