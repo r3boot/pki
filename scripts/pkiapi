@@ -61,6 +61,7 @@ _d_cfgfile = '/etc/pki/server.yml'
 _d_workspace = '/etc/pki'
 _d_host = 'localhost'
 _d_port = 4392
+_d_permissive = False
 
 
 # Helper dictionary containing a yaml to subject mapping
@@ -76,6 +77,13 @@ _subject_to_yaml = {
 # Global variable to contain the CA details
 ca = None
 
+
+# Global variable used to indicate if debugging is enabled
+enable_debug = _d_debug
+
+
+# Global variable used to indicate if permissive mode needs to be enabled
+enable_permissive = _d_permissive
 
 # Template containing client.yml
 client_yml_template = """---
@@ -248,9 +256,9 @@ def valid_srcip(srcip, fqdn):
         if ip not in ips:
             ips.append(ip)
     if srcip not in ips:
-        # Permissive
         warning('{0} is not a valid ip address for {1}'.format(srcip, fqdn))
-        return True
+        if not enable_permissive:
+            return False
 
     return True
 
@@ -729,16 +737,23 @@ if __name__ == '__main__':
     parser.add_argument('-p', dest='port', action='store',
                         type=int, default=_d_port,
                         help='Port on which to bind the PKI service')
+    parser.add_argument('--permissive', dest='permissive', action='store_true',
+                        default=_d_permissive, help='Enable permissive mode')
     args = parser.parse_args()
 
     # Initialize debug logging
     enable_debug = args.debug
+
+    # Initialize permissive mode
+    enable_permissive = args.permissive
 
     # Exit if configuration file does not exist
     if not os.path.exists(args.cfgfile):
         error('{0} does not exist'.format(args.cfgfile))
 
     # All green, proceed with the program
+    if enable_permissive:
+        warning('Running in permissive mode')
     debug('Using configuration from {0}'.format(args.cfgfile))
     debug('Using {0} as a workspace'.format(args.workspace))
 

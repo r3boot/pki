@@ -1,10 +1,7 @@
 ### TODO list (in no particular order
-- Make all validation checks restrictive (and add option to make them permissive)
-- Make sure all api calls are properly restricted
 - Add DNS validation check
 - Make days configurable
 - Make paths absolute in root.cfg
-- Make sure templates are installed into workspace
 - Un-fudge the various configuration dicts (self.ca, self.cfg, etc)
 - Make client.yml template more templated
 
