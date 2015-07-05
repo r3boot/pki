@@ -1,0 +1,11 @@
+### Secure machine
+1. ./scripts/pki -D -f ./config/pki.yml -w ./workspace init
+2. <create various usage packages>
+
+### PKI Autosigner(s)
+1. Install usage package
+2. python [.scripts]pki -f config/pki.yml -w workspace serve
+
+### Clients
+1. Install usage package
+2. ./scripts/pkiclient -D -f ./workspace/client.yml -w ./workspace -o ./workspace newcert

@@ -9,8 +9,8 @@ import random
 import shlex
 import socket
 import subprocess
-import tempfile
 
+from pki.constants          import *
 from pki.logging            import *
 from pki.utils              import *
 from pki.validation         import *
@@ -56,14 +56,14 @@ def validate_request(f):
         if 'csr' in data:
             csr_data = data['csr']
             try:
-                fd = tempfile.NamedTemporaryFile(prefix='/var/tmp/')
+                fd = mkstemp(prefix=C_TMPDIR)
             except OSError, e:
                 warning('Error creating temporary file: {0}'.format(e))
                 return bottle.HTTPResponse(status=403)
             fd.write(csr_data)
-            fd.flush()
-            result = valid_csr(ca, fd.name, fqdn=fqdn)
             fd.close()
+            result = valid_csr(ca, cfname(fd.name), fqdn=fqdn)
+            os.unlink(fd.name)
             if not result:
                 return bottle.HTTPResponse(status=403)
             debug('{0} submitted a valid csr'.format(fqdn))
@@ -72,14 +72,14 @@ def validate_request(f):
         if 'crt' in data:
             crt_data = data['crt']
             try:
-                fd = tempfile.NamedTemporaryFile(prefix='/var/tmp/')
+                fd = mkstemp(prefix=C_TMPDIR)
             except OSError, e:
                 warning('Error creating temporary file: {0}'.format(e))
                 return bottle.HTTPResponse(status=403)
             fd.write(crt_data)
-            fd.flush()
-            result = valid_crt(ca, fd.name)
             fd.close()
+            result = valid_crt(ca, cfname(fd.name))
+            os.unlink(fd.name)
             if not result:
                 return bottle.HTTPResponse(status=403)
             debug('{0} submitted a valid crt'.format(fqdn))
@@ -99,7 +99,7 @@ def generate_token(fqdn):
     raw_data = bottle.request.body.read()
     data = json.loads(raw_data)
 
-    template_file = '{0}/templates/client.yml.j2'.format(ca.cfg['common']['workspace'])
+    template_file = '{0}/templates/client_yml.template'.format(ca.cfg['common']['workspace'])
     if not os.path.exists(template_file):
         warning('{0} does not exist'.format(template_file))
         return bottle.HTTPResponse(status=501, body='Internal error')
@@ -122,7 +122,7 @@ def generate_token(fqdn):
     template_data = open(template_file, 'r').read()
     template = mako.template.Template(template_data)
     cfg_data = template.render(
-        server_host='127.0.0.1',
+        server_host='10.42.15.17',
         server_port=4392,
         client_token=token,
     )
@@ -146,13 +146,13 @@ def sign_servers_cert():
         return bottle.HTTPResponse(status=403)
     csr_data = data['csr']
 
-    csr = '{0}/csr/{1}.csr'.format(ca.ca['basedir'], fqdn)
+    csr = '{0}/csr/{1}.csr'.format(ca.ca['basedir'], cfhost(fqdn))
     open(csr, 'w').write('{0}\n'.format(csr_data))
 
-    if not valid_csr(ca, csr, fqdn=data['fqdn']):
+    if not valid_csr(ca, csr, fqdn=fqdn):
         return bottle.HTTPResponse(status=403)
 
-    crt = '{0}/certs/{1}.pem'.format(ca.ca['basedir'], data['fqdn'])
+    crt = '{0}/certs/{1}.pem'.format(ca.ca['basedir'], cfhost(fqdn))
     ca.autosign(csr, crt)
 
     certificate = open(crt, 'r').read()
@@ -178,20 +178,21 @@ def revoke_certificate():
 
     ## Save the certificate to be revoked for later usage
     try:
-        fd = tempfile.NamedTemporaryFile(prefix='/var/tmp/')
+        fd = mkstemp(prefix=C_TMPDIR)
     except OSError, e:
         warning('Error creating temporary file: {0}'.format(e))
         return bottle.HTTPResponse(status=403)
     fd.write(crt_data)
+    fd.close()
 
     ## Revoke the certificate
     ca.revoke(fd.name)
 
     ### Close the file descriptor towards the temporary certificate
-    fd.close()
+    os.unlink(fd.name)
 
     info('Revoked the certificate for {0}'.format(fqdn))
 
 
 def run(host='localhost', port=4392):
-    bottle.run(host=host, port=port)
+    bottle.run(host=host, port=port, fast=True)

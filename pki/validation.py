@@ -7,9 +7,10 @@ import re
 import shlex
 import socket
 import subprocess
-import tempfile
 
+from pki.constants  import *
 from pki.logging    import *
+from pki.utils      import *
 
 _subject_to_yaml = {
     'C':    'country',
@@ -100,9 +101,11 @@ def valid_csr(ca, csr, fqdn):
     @return:    False       One or more fields have issues
     """
     cmdline = 'openssl req -in {0} -noout -subject'.format(csr)
+    info(cmdline)
     cmdline = shlex.split(cmdline)
     proc = subprocess.Popen(cmdline, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     output, err = proc.communicate()
+    info(err)
     output = output.replace('subject=/', '').strip()
     raw_subject = output.split('/')
     subject = {}
@@ -155,12 +158,12 @@ def valid_crt(ca, crt):
 
     ## Save the certificate to be revoked for later usage
     try:
-        fd = tempfile.NamedTemporaryFile(prefix='/var/tmp/')
+        fd = mkstemp(prefix=C_TMPDIR)
     except OSError, e:
         warning('Error creating temporary file: {0}'.format(e))
         return bottle.HTTPResponse(status=403)
     fd.write(crt_data)
-    fd.flush()
+    fd.close()
 
     ## Get the fingerprint of the certificate
     cmdline = 'openssl x509 -in {0} -noout -fingerprint'.format(fd.name)
@@ -170,7 +173,7 @@ def valid_crt(ca, crt):
     fingerprint = output.replace('SHA1 Fingerprint=', '').strip()
 
     ### Close the file descriptor towards the temporary certificate
-    fd.close()
+    os.unlink(fd.name)
 
     ## Get a list of valid fingerprints from the locally generated certs
     local_fingerprints = []

@@ -77,9 +77,9 @@ class APIClient(Parent):
         crt = '{0}/certs/{1}.pem'.format(self._cfg['x509'], fqdn)
 
         if vhost:
-            template_file = '{0}/templates/tls-vhost-request.cfg.j2'.format(self._cfg['workspace'])
+            template_file = '{0}/templates/tls-vhost-request_cfg.template'.format(self._cfg['workspace'])
         else:
-            template_file = '{0}/templates/tls-server-request.cfg.j2'.format(self._cfg['workspace'])
+            template_file = '{0}/templates/tls-server-request_cfg.template'.format(self._cfg['workspace'])
         template_data = open(template_file, 'r').read()
         template = mako.template.Template(template_data)
         cfg_data = template.render(fqdn=fqdn, san=san, certs=self._cfg['certs'])

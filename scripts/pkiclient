@@ -24,6 +24,7 @@ _d_workspace = '/etc/pki'
 _d_x509 = '/etc/ssl'
 _d_vhost = None
 
+
 def fetch_new_token_and_config(hostname, args):
     if not args.url:
         error('Need a URL to connect to for initialization')

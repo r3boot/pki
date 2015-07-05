@@ -1,10 +1,13 @@
 
+import commands
 import getpass
 import mako.template
 import os
+import shlex
 import time
 
 from pki.logging    import *
+from pki.utils      import *
 from pki.parent     import *
 
 CA_ROOT = 'root'
@@ -39,16 +42,16 @@ class CA(Parent):
             'workspace': self.cfg['common']['workspace'],
             'basedir': basedir,
             'baseurl': self.cfg['common']['baseurl'],
-            'cfg': os.path.abspath('{0}/cfg/{1}.cfg'.format(basedir, name)),
-            'csr': os.path.abspath('{0}/csr/{1}.csr'.format(basedir, name)),
-            'crl': os.path.abspath('{0}/crl/{1}.crl'.format(basedir, name)),
-            'key': os.path.abspath('{0}/private/{1}.key'.format(basedir, name)),
-            'crt': os.path.abspath('{0}/certs/{1}.pem'.format(basedir, name)),
+            'cfg': os.path.abspath('{0}/cfg/{1}.cfg'.format(basedir, cfhost(name))),
+            'csr': os.path.abspath('{0}/csr/{1}.csr'.format(basedir, cfhost(name))),
+            'crl': os.path.abspath('{0}/crl/{1}.crl'.format(basedir, cfhost(name))),
+            'key': os.path.abspath('{0}/private/{1}.key'.format(basedir, cfhost(name))),
+            'crt': os.path.abspath('{0}/certs/{1}.pem'.format(basedir, cfhost(name))),
             'days': 60*60*24*days,
-            'db': '{0}/db/{1}.db'.format(basedir, name),
-            'db_attr': '{0}/db/{1}.db.attr'.format(basedir, name),
-            'crt_idx': '{0}/db/{1}-crt.idx'.format(basedir, name),
-            'crl_idx': '{0}/db/{1}-crl.idx'.format(basedir, name),
+            'db': '{0}/db/{1}.db'.format(basedir, cfhost(name)),
+            'db_attr': '{0}/db/{1}-db.attr'.format(basedir, cfhost(name)),
+            'crt_idx': '{0}/db/{1}-crt.idx'.format(basedir, cfhost(name)),
+            'crl_idx': '{0}/db/{1}-crl.idx'.format(basedir, cfhost(name)),
         }
         self.name = name
         self.basedir = os.path.abspath(basedir)
@@ -85,7 +88,7 @@ class CA(Parent):
 
         print('\n')
         info('Installing openssl configuration file for {0} CA'.format(self.ca['name']))
-        src_template = '{0}/templates/root.cfg.j2'.format(self.ca['workspace'])
+        src_template = '{0}/templates/root_cfg.template'.format(self.ca['workspace'])
         cfgfile = '{0}/cfg/{1}.cfg'.format(self.ca['basedir'], self.ca['name'])
         if not os.path.exists(src_template):
             error('{0} does not exist'.format(src_template))
@@ -102,6 +105,7 @@ class CA(Parent):
         cfg['basedir'] = '{0}/{1}'.format(self.ca['workspace'], self.name)
         cfg['ca_type'] = self.ca_type
         cfg['name'] = self.name
+        cfg['ca'] = self.ca
 
         template_data = open(src_template, 'r').read()
         template = mako.template.Template(template_data)
@@ -118,7 +122,10 @@ class CA(Parent):
         crl = '{0}/crl/{1}.crl'.format(self.ca['basedir'], self.ca['name'])
 
         info('Generating crl for {0} CA'.format(self.ca['name']))
-        cmdline = 'openssl ca -gencrl -config {0} -out {1}'.format(self.ca['cfg'], self.ca['crl'])
+        cmdline = 'openssl ca -gencrl -config {0} -out {1}'.format(
+            cfname(self.ca['cfg']),
+            cfname(self.ca['crl']),
+        )
         os.chdir(self.basedir)
         proc = self.run(cmdline)
         proc.communicate()
@@ -127,7 +134,12 @@ class CA(Parent):
     def sign_intermediary(self, csr, crt):
         print('\n')
         info('Signing certificate using {0} CA'.format(self.ca['name']))
-        cmdline = 'openssl ca -config {0} -in {1} -out {2} -extensions intermediate_ca_ext -enddate {3}'.format(self.ca['cfg'], csr, crt, self.gen_enddate())
+        cmdline = 'openssl ca -config {0} -in {1} -out {2} -extensions intermediate_ca_ext -enddate {3}'.format(
+            cfname(self.ca['cfg']),
+            cfname(csr),
+            cfname(crt),
+            self.gen_enddate()
+        )
         os.chdir(self.basedir)
         proc = self.run(cmdline, stdout=True)
         proc.communicate()
@@ -135,15 +147,24 @@ class CA(Parent):
 
     def autosign(self, csr, crt):
         info('Signing certificate using {0} CA'.format(self.ca['name']))
-        cmdline = 'openssl ca -config {0} -in {1} -out {2} -extensions server_ext'.format(self.ca['cfg'], csr, crt)
+        cmdline = 'openssl ca -config {0} -in {1} -out {2} -extensions server_ext'.format(
+            cfname(self.ca['cfg']),
+            cfname(csr),
+            cfname(crt),
+        )
         os.chdir(self.basedir)
         proc = self.run(cmdline, stdin=True)
-        proc.communicate(input=b'y\ny\n')
+        output, err = proc.communicate(input=b'y\ny\n')
+        info(output)
+        info(err)
 
 
     def revoke(self, crt):
         info('Revoking certificate using {0} CA'.format(self.ca['name']))
-        cmdline = 'openssl ca -config {0} -revoke {1} -crl_reason superseded'.format(self.ca['cfg'], crt)
+        cmdline = 'openssl ca -config {0} -revoke {1} -crl_reason superseded'.format(
+            cfname(self.ca['cfg']),
+            cfname(crt),
+        )
         os.chdir(self.basedir)
         proc = self.run(cmdline)
         proc.communicate()

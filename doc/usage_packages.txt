@@ -1,0 +1,11 @@
+### CA initialization
+- name: initca
+  portability: Linux
+
+### Autosign service
+- name: autosign
+  portability: Linux, OpenVMS
+
+### Client
+- name: pkiclient
+  portability: Linux
