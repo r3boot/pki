@@ -171,7 +171,7 @@ def run(cmd, stdin=False, stdout=False):
         stdout_fd = subprocess.PIPE
 
     return subprocess.Popen(cmd, stdin=stdin_fd, stdout=stdout_fd,
-                            stderr=stdout_fd, shell=True)
+                            stderr=stdout_fd)
 
 
 def print_message(prefix, message):
