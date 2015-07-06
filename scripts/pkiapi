@@ -684,9 +684,11 @@ class AutosignAPI:
         tokens[fqdn] = token
         open(token_store, 'w').write(json.dumps(tokens))
 
+        hostname = socket.gethostname()
+        ipaddr = socket.gethostbyname(hostname)
         template = mako.template.Template(client_yml_template)
         cfg_data = template.render(
-            server_host='10.42.15.17',
+            server_host=ipaddr,
             server_port=4392,
             client_token=token,
         )
