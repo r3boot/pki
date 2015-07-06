@@ -5,6 +5,7 @@ import glob
 import hashlib
 import json
 import os
+import platform
 import random
 import re
 import shlex
@@ -12,6 +13,9 @@ import socket
 import subprocess
 import sys
 
+if os.uname()[0] == 'OpenVMS':
+    import commands
+    sys.path.append('./lib')
 
 # Handle external dependencies
 try:
@@ -105,19 +109,35 @@ certs:
 
 
 def fpath(name):
-    """ fpath:      Helper function which converts a unix path to an openvms
-                    path.
+    """ fpath:      Helper function which converts a unix filepath to a vms
+                    ddcu style filepath.
 
     @param:     name    String containing the unix path to convert
     @return:    str     Translated path if running under vms, else name
     """
-    if os.uname()[0] != 'OpenVMS':
+    if C_OSNAME != 'OpenVMS':
         return name
     t = name.split('/')[1:]
     device = t[0]
     path = '.'.join(t[1:len(t)-1])
     fname = t[len(t)-1]
-    return '{0}:[{1}]{2}'.format(device, path, fname)
+    return '{0}:[{1}]{2}'.format(device, path, fname).lower()
+
+
+def fdir(name):
+    """ fdir:       Helper function which converts a unix path to a vms ddcu
+                    style path.
+
+    @param:     name    String containing the unix path to convert
+    @return:    str     Translated path if running under vms, else name
+    """
+    if C_OSNAME != 'OpenVMS':
+        return name
+
+    t = name.split('/')[1:]
+    device = t[0]
+    path = '.'.join(t[1:len(t)])
+    return '{0}:[{1}]'.format(device, path).lower()
 
 
 def fhost(name):
@@ -127,6 +147,9 @@ def fhost(name):
     @param:     name    String containing the hostname to convert
     @return:    str     Translated hostname if running under vms, else name
     """
+    if C_OSNAME != 'OpenVMS':
+        return name
+
     return name.replace('.', '_')
 
 
@@ -148,7 +171,7 @@ def run(cmd, stdin=False, stdout=False):
         stdout_fd = subprocess.PIPE
 
     return subprocess.Popen(cmd, stdin=stdin_fd, stdout=stdout_fd,
-                            stderr=stdout_fd)
+                            stderr=stdout_fd, shell=True)
 
 
 def print_message(prefix, message):
@@ -497,18 +520,34 @@ class AutosignCA:
         self.name = name
         self.basedir = os.path.abspath(basedir)
         self.ca_directories = ['certs', 'cfg', 'crl', 'csr', 'db', 'private']
+        if C_OSNAME == 'OpenVMS':
+            self._vms_basedir = fdir(basedir)
+
+    def _vmsdir(self, name):
+        """ _vmsdir:    Helper function to create a path used for vms cli paths
+
+        @param:     name    String containing the path to convert
+        @return:    str     Converted path
+        """
+        if C_OSNAME != 'OpenVMS':
+            return name
+        return name.replace(self._vms_basedir.replace(']', ''), '[')
 
     def updatecrl(self):
         """ updatecrl:  Updates the Certificate Revocation list for this CA
         """
         info('Generating crl for {0} CA'.format(self.ca['name']))
+        cfg = self._vmsdir(self.ca['cfg'])
+        crl = self._vmsdir(self.ca['crl'])
         cmdline = 'openssl ca -gencrl -config {0} -out {1}'.format(
-            fpath(self.ca['cfg']),
-            fpath(self.ca['crl']),
+            cfg, crl
         )
         os.chdir(self.basedir)
-        proc = run(cmdline, stdout=True)
-        proc.communicate()
+        if C_OSNAME == 'OpenVMS':
+            commands.getoutput(cmdline)
+        else:
+            proc = run(cmdline, stdout=True)
+            proc.communicate()
 
     def autosign(self, csr, crt):
         """ autosign:   Autosigns a csr using this CA
@@ -517,15 +556,19 @@ class AutosignCA:
         @param:     crt Path to the generated certificate
         """
         info('Signing certificate using {0} CA'.format(self.ca['name']))
+        cfg = self._vmsdir(self.ca['cfg'])
+        csr = self._vmsdir(fpath(csr))
+        crt = self._vmsdir(fpath(crt))
         cmdline = 'openssl ca -config {0} -in {1} -out {2}'.format(
-            fpath(self.ca['cfg']),
-            fpath(csr),
-            fpath(crt),
+            cfg, csr, crt
         )
-        cmdline += ' -extensions server_ext'
+        cmdline += ' -batch -extensions server_ext'
         os.chdir(self.basedir)
-        proc = run(cmdline, stdin=True, stdout=True)
-        output, err = proc.communicate(input=b'y\ny\n')
+        if C_OSNAME == 'OpenVMS':
+            commands.getoutput(cmdline)
+        else:
+            proc = run(cmdline, stdout=True)
+            proc.communicate()
 
     def revoke(self, crt):
         """ revoke:     Revokes a certificate under this CA
@@ -533,14 +576,18 @@ class AutosignCA:
         @param:     crt Path to certificate to revoke
         """
         info('Revoking certificate using {0} CA'.format(self.ca['name']))
+        cfg = self._vmsdir(self.ca['cfg'])
+        crt = self._vmsdir(fpath(crt))
         cmdline = 'openssl ca -config {0} -revoke {1}'.format(
-            fpath(self.ca['cfg']),
-            fpath(crt),
+            cfg, crt
         )
         cmdline += ' -crl_reason superseded'
         os.chdir(self.basedir)
-        proc = run(cmdline, stdout=True)
-        proc.communicate()
+        if C_OSNAME == 'OpenVMS':
+            commands.getoutput(cmdline)
+        else:
+            proc = run(cmdline, stdout=True)
+            proc.communicate()
 
         self.updatecrl()
 
@@ -639,7 +686,7 @@ class AutosignAPI:
 
         template = mako.template.Template(client_yml_template)
         cfg_data = template.render(
-            server_host='127.0.0.1',
+            server_host='10.42.15.17',
             server_port=4392,
             client_token=token,
         )
@@ -746,6 +793,12 @@ if __name__ == '__main__':
 
     # Initialize permissive mode
     enable_permissive = args.permissive
+
+    # Display the platform we're running on
+    debug('Running under Python {0} on {1}'.format(
+        platform.python_version(),
+        os.uname()[0]
+    ))
 
     # Exit if configuration file does not exist
     if not os.path.exists(args.cfgfile):

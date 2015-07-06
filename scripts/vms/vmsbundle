@@ -1,0 +1,387 @@
+#!/usr/bin/env python
+
+import argparse
+import os
+import platform
+import shutil
+import sys
+import tempfile
+import zipfile
+
+
+# Handle external dependencies
+try:
+    import mako.template
+except ImportError:
+    print('Failed to import mako, please run "pip install mako"')
+    sys.exit(1)
+
+try:
+    import yaml
+except ImportError:
+    print('Failed to import PyYaml, please run "pip install pyyaml"')
+    sys.exit(1)
+
+
+# Set module details
+__description__ = 'AS65342 PKI -- VMS bundle generator component'
+__version__ = 0.1
+__author__ = 'Lex van Roon'
+__email__ = 'r3boot@r3blog.nl'
+__url__ = 'https://gitlab.as65342.net/r3boot/pki'
+
+
+# Various default values used as CLI arguments
+_d_debug = False
+_d_cfgfile = '/etc/pki/server.yml'
+_d_destdir = '/cluster/temp/pki'
+_d_bundle = './pki-vms.zip'
+
+
+# Template containing openssl.cfg which can be used under VMS
+openssl_cfg_template = """# ${ca['cn']}
+
+[ default ]
+ca                      = ${ca['name']}      # CA name
+dir                     = ${ca['ca_dir']}           # Top dir
+base_url                = ${ca['baseurl']}           # CA base URL
+aia_url                 = ${ca['baseurl']}/${ca['name']}.pem # CA URL
+crl_url                 = ${ca['baseurl']}/${ca['name']}.crl # CRL URL
+oscp_url                = ${ca['oscpurl']}
+name_opt                = multiline,-esc_msb,utf8 # Display UTF-8 characters
+openssl_conf            = openssl_init          # Library config section
+
+# CA certificate request
+
+[ req ]
+default_bits            = ${crypto['bits']}              # RSA key size
+encrypt_key             = no                   # Protect private key
+default_md              = ${crypto['hash']}              # MD to use
+utf8                    = yes                   # Input is UTF-8
+string_mask             = utf8only              # Emit UTF-8 strings
+prompt                  = no                    # Don't prompt for DN
+distinguished_name      = ca_dn                 # DN section
+req_extensions          = ca_reqext             # Desired extensions
+
+[ ca_dn ]
+countryName             = "${ca['country']}"
+stateOrProvinceName     = "${ca['province']}"
+localityName            = "${ca['city']}"
+organizationName        = "${ca['organization']}"
+organizationalUnitName  = "${ca['unit']}"
+commonName              = "${ca['cn']}"
+
+[ ca_reqext ]
+keyUsage                = critical,keyCertSign,cRLSign
+basicConstraints        = critical,CA:true,pathlen:0
+subjectKeyIdentifier    = hash
+
+# CA operational settings
+
+[ ca ]
+default_ca              = ${ca['name']}         # The default CA section
+
+[ ${ca['name']} ]
+certificate             = ${ca['crt']}       # The CA cert
+private_key             = ${ca['key']} # CA private key
+new_certs_dir           = ${ca['certs']}           # Certificate archive
+serial                  = ${ca['crt_idx']} # Serial number file
+crlnumber               = ${ca['crl_idx']} # CRL number file
+database                = ${ca['db']} # Index file
+unique_subject          = no                    # Require unique subject
+default_days            = 3652                  # How long to certify for
+default_md              = ${crypto['hash']}              # MD to use
+policy                  = match_pol             # Default naming policy
+email_in_dn             = no                    # Add email to cert DN
+preserve                = no                    # Keep passed DN ordering
+name_opt                = multiline,-esc_msb,utf8 # Subject DN display options
+cert_opt                = ca_default            # Certificate display options
+copy_extensions         = copy # Copy extensions from CSR
+x509_extensions         = server_ext           # Default cert extensions
+default_crl_days        = 1                     # How long before next CRL
+crl_extensions          = crl_ext               # CRL extensions
+
+[ match_pol ]
+countryName             = match
+stateOrProvinceName     = optional
+localityName            = optional
+organizationName        = match
+organizationalUnitName  = optional
+commonName              = supplied
+
+[ any_pol ]
+domainComponent         = optional
+countryName             = optional
+stateOrProvinceName     = optional
+localityName            = optional
+organizationName        = optional
+organizationalUnitName  = optional
+commonName              = optional
+emailAddress            = optional
+
+# Extensions
+[ server_ext ]
+keyUsage                = critical,digitalSignature,keyEncipherment
+basicConstraints        = CA:false
+extendedKeyUsage        = serverAuth,clientAuth
+subjectKeyIdentifier    = hash
+authorityKeyIdentifier  = keyid:always
+authorityInfoAccess     = @ocsp_info
+crlDistributionPoints   = @crl_info
+certificatePolicies     = MediumDevice
+
+[ ocspsign_ext ]
+keyUsage                = critical,digitalSignature
+basicConstraints        = CA:false
+extendedKeyUsage        = critical,OCSPSigning
+subjectKeyIdentifier    = hash
+authorityKeyIdentifier  = keyid:always
+authorityInfoAccess     = @issuer_info
+noCheck                 = null
+certificatePolicies     = MediumDevice
+
+[ crl_ext ]
+authorityKeyIdentifier  = keyid:always
+authorityInfoAccess     = @issuer_info
+
+[ ocsp_info ]
+caIssuers;URI.0         = ${ca['baseurl']}/${ca['name']}.pem
+OCSP;URI.0              = ${ca['oscpurl']}
+
+[ issuer_info ]
+caIssuers;URI.0         = ${ca['baseurl']}/${ca['name']}.pem
+
+[ crl_info ]
+URI.0                   = ${ca['baseurl']}/${ca['name']}.crl
+
+# Policy OIDs
+
+[ openssl_init ]
+oid_section             = additional_oids
+
+[ additional_oids ]
+MediumDevice        = AS65342 Medium Device Assurance, 1.3.6.1.4.1.0.1.7.9
+"""
+
+
+def fpath(somepath, is_dir=False):
+    """ vmspath:        Returns somepath in DDCU VMS format
+
+    @param:     somepath    Path to convert
+    @param:     is_dir      When True, output a directory instead of a file
+    @return:    str         Path in DDCU format
+    """
+    # Convert dots to underscores
+    t = somepath.split('.')
+    s1 = '.'.join(t[:len(t)-1]).replace('.', '_')
+    s2 = ''.join(t[len(t)-1:])
+    somepath = '{0}.{1}'.format(s1, s2)
+
+    # Convert unix path to vms path
+    t = somepath.split('/')[1:]
+    device = t[0]
+    if is_dir:
+        path = '.'.join(t[1:])
+        fname = ''
+    else:
+        path = '.'.join(t[1:len(t)-1])
+        fname = t[len(t)-1]
+    ddcu = '{0}:[{1}]{2}'.format(device, path, fname)
+    return ddcu
+
+
+def print_message(prefix, message):
+    """ print_message:      Prints a message on the screen using a prefix
+
+    @param:     prefix      Prefix to use
+    @param:     message     Message to display
+    """
+    print('{0} {1}'.format(prefix, message))
+
+
+def info(message):
+    """ info:           Display an informational message
+
+    @param:     message Message to display
+    """
+    print_message('[+]', message)
+
+
+def warning(message):
+    """ warning:    Display a warning message
+
+    @param:     message Message to display
+    """
+    print_message('[W]', message)
+
+
+def debug(message):
+    """ warning:    Display a debug message if debugging is enabled
+
+    @param:     message Message to display
+    """
+    if not enable_debug:
+        return
+    print_message('[D]', message)
+
+
+def error(message):
+    """ warning:    Display an error message and exit the application
+
+    @param:     message Message to display
+    """
+    print_message('[E]', message)
+    sys.exit(1)
+
+
+if __name__ == '__main__':
+    """ __main__:   Main program to execute
+    """
+    # Parse CLI arguments
+    parser = argparse.ArgumentParser(description=__description__)
+    parser.add_argument('-d', dest='debug', action='store_true',
+                        default=_d_debug, help='Enable debugging')
+    parser.add_argument('-f', dest='cfgfile', action='store',
+                        type=str, default=_d_cfgfile,
+                        help='Path to PKI configuration file')
+    parser.add_argument('-w', dest='destdir', action='store',
+                        type=str, default=_d_destdir,
+                        help='Path to pki software on VMS')
+    parser.add_argument('-o', dest='zipfile', action='store',
+                        type=str, default=_d_bundle,
+                        help='Path to output zipfile')
+    args = parser.parse_args()
+
+    # Setup logging
+    enable_debug = args.debug
+
+    # Setup the base directory for copying
+    basedir = os.getcwd()
+
+    # Display the platform we're running on
+    debug('Running under Python {0} on {1}'.format(
+        platform.python_version(),
+        os.uname()[0]
+    ))
+
+    # Check if we're in the right directory
+    if not os.path.exists('./workspace/as65342-autosign'):
+        error('Please run this script from the base script directory')
+
+    # Check if bottle.py exists
+    bottle_py = '/usr/lib/python3.4/site-packages/bottle.py'
+    if not os.path.exists(bottle_py):
+        bottle_py = '/usr/lib/python2.7/site-packages/bottle.py'
+        if not os.path.exists(bottle_py):
+            error('No bottle.py found in python site-packages')
+
+    # Check if configuration file exists, and load it if it does
+    if not os.path.exists(args.cfgfile):
+        error('{0} does not exist'.format(args.cfgfile))
+    raw_cfg = open(args.cfgfile, 'r').read()
+    config = yaml.safe_load(raw_cfg)
+    config['common'].update(config['autosign'])
+
+    # Check if output zipfile already exists and unlink it if it does
+    if os.path.exists(args.zipfile):
+        debug('Removing old {0}'.format(args.zipfile))
+        os.unlink(args.zipfile)
+
+    # Setup the variables for our temporary workspace
+    tmpdir = tempfile.mkdtemp(prefix='/var/tmp/')
+    workspace = '{0}/pki'.format(tmpdir)
+    scriptdir = '{0}/scripts'.format(workspace)
+    libdir = '{0}/lib'.format(workspace)
+    cfgdir = '{0}/config'.format(workspace)
+    pkidir = '{0}/store'.format(workspace)
+
+    # Setup the variables which will be used under OpenVMS
+    ca_name = 'as65342-autosign'
+    ca_dir = '{0}/store/{1}'.format(args.destdir, ca_name)
+
+    # Setup the variables to be used in the template
+    ca = {
+        'name': 'as65342-autosign',
+        'ca_dir': fpath(ca_dir),
+        'cn': config['common']['cn'],
+        'baseurl': config['common']['baseurl'],
+        'oscpurl': config['common']['oscpurl'],
+        'country': config['common']['country'],
+        'province': config['common']['province'],
+        'city': config['common']['city'],
+        'organization': config['common']['organization'],
+        'unit': config['common']['unit'],
+        'crt': fpath('{0}/certs/{1}.pem'.format(ca_dir, ca_name)),
+        'key': fpath('{0}/private/{1}.key'.format(ca_dir, ca_name)),
+        'certs': fpath('{0}/certs'.format(ca_dir, ca_name), is_dir=True),
+        'crt_idx': fpath('{0}/db/{1}-crt.idx'.format(ca_dir, ca_name)),
+        'crl_idx': fpath('{0}/db/{1}-crl.idx'.format(ca_dir, ca_name)),
+        'db': fpath('{0}/db/{1}.db'.format(ca_dir, ca_name)),
+    }
+
+    # Create working directories
+    for directory in [workspace, scriptdir, libdir, cfgdir, pkidir]:
+        debug('Creating {0}'.format(directory))
+        os.mkdir(directory)
+
+    # Copy the CA certificate storage into the workspace
+    autosign_ca = '{0}/workspace/{1}'.format(basedir, ca_name)
+    destdir = '{0}/{1}'.format(pkidir, ca_name)
+    debug('Installing {0}'.format(destdir))
+    shutil.copytree(autosign_ca, destdir)
+
+    # Install a customized openssl.cfg
+    cfg_file = '{0}/{1}/cfg/{1}.cfg'.format(pkidir, ca_name)
+    template = mako.template.Template(openssl_cfg_template,
+                                      strict_undefined=True)
+    cfg_data = template.render(
+        ca=ca,
+        crypto=config['crypto']
+    )
+    debug('Installing custom {0}'.format(cfg_file))
+    open(cfg_file, 'w').write('{0}\n'.format(cfg_data))
+
+    # Copy the pki api script
+    autosign_api = '{0}/scripts/pkiapi'.format(basedir)
+    dest = '{0}/pkiapi.py'.format(scriptdir)
+    debug('Installing {0}'.format(dest))
+    shutil.copy(autosign_api, dest)
+
+    # Copy the DCL run script
+    autosign_dcl = '{0}/scripts/vms/pkiapi.com'.format(basedir)
+    dest = '{0}/pkiapi.com'.format(scriptdir)
+    debug('Installing {0}'.format(dest))
+    shutil.copy(autosign_dcl, dest)
+
+    # Copy the pki configuration
+    autosign_cfg = '{0}/config/pki.yml'.format(basedir)
+    dest = '{0}/pki.yml'.format(cfgdir)
+    debug('Installing {0}'.format(dest))
+    shutil.copy(autosign_cfg, dest)
+
+    # Copy bottle.py
+    dest = '{0}/bottle.py'.format(libdir)
+    debug('Installing {0}'.format(dest))
+    shutil.copy(bottle_py, dest)
+
+    # Create a zipfile containing the bundle
+    debug('Creating {0}'.format(args.zipfile))
+    with zipfile.ZipFile(args.zipfile, 'w') as fd:
+        oldcwd = os.getcwd()
+        os.chdir(tmpdir)
+        for cur_dir, directories, files in os.walk(tmpdir):
+            debug('Entering {0}'.format(cur_dir))
+            for f in files:
+                fname = '{0}/{1}'.format(cur_dir.replace(tmpdir, '.'), f)
+                debug('Adding file {0}'.format(fname))
+                fd.write(fname)
+            for d in directories:
+                dname = '{0}/{1}'.format(cur_dir.replace(tmpdir, '.'), d)
+                debug('Adding directory {0}'.format(dname))
+                fd.write(dname)
+        os.chdir(oldcwd)
+
+    debug('Removing {0}'.format(tmpdir))
+    shutil.rmtree(tmpdir)
+
+    info('Generated {0}'.format(args.zipfile))
