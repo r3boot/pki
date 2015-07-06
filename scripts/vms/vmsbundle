@@ -89,7 +89,7 @@ serial                  = ${ca['crt_idx']} # Serial number file
 crlnumber               = ${ca['crl_idx']} # CRL number file
 database                = ${ca['db']} # Index file
 unique_subject          = no                    # Require unique subject
-default_days            = 3652                  # How long to certify for
+default_days            = ${ca['days']}               # How long to certify for
 default_md              = ${crypto['hash']}              # MD to use
 policy                  = match_pol             # Default naming policy
 email_in_dn             = no                    # Add email to cert DN
@@ -131,7 +131,7 @@ crlDistributionPoints   = @crl_info
 certificatePolicies     = MediumDevice
 
 [ ocspsign_ext ]
-keyUsage                = critical,digitalSignature
+keyUsage                = critical,nonRepudiation,digitalSignature
 basicConstraints        = CA:false
 extendedKeyUsage        = critical,OCSPSigning
 subjectKeyIdentifier    = hash

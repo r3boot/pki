@@ -110,7 +110,7 @@ serial                  = $dir/db/$ca-crt.idx # Serial number file
 crlnumber               = $dir/db/$ca-crl.idx # CRL number file
 database                = $dir/db/$ca.db # Index file
 unique_subject          = no                    # Require unique subject
-default_days            = 3652                  # How long to certify for
+default_days            = ${ca['days']}        # How long to certify for
 default_md              = ${crypto['hash']}              # MD to use
 policy                  = match_pol             # Default naming policy
 email_in_dn             = no                    # Add email to cert DN
@@ -192,7 +192,7 @@ crlDistributionPoints   = @crl_info
 certificatePolicies     = MediumDevice
 
 [ ocspsign_ext ]
-keyUsage                = critical,digitalSignature
+keyUsage                = critical,nonRepudiation,digitalSignature
 basicConstraints        = CA:false
 extendedKeyUsage        = critical,OCSPSigning
 subjectKeyIdentifier    = hash
@@ -335,12 +335,11 @@ class CA:
     ca_type = None
     ca = {}
 
-    def __init__(self, config, days=3652):
+    def __init__(self, config):
         """ __init__:   Initializes CA class
 
         @param:     config  Dictionary containing the contents of the
                             configuration file
-        @param:     days    Number of days the CA certificate will be valid
         """
         self.cfg = config
         name = '{0}-{1}'.format(self.cfg['common']['name'], self.ca_type)
@@ -348,6 +347,12 @@ class CA:
 
         if not self.ca_type:
             error('ca_type not defined')
+
+        days = 60*60*365*10
+        try:
+            days = self.cfg[self.ca_type]['days']
+        except KeyError:
+            days = self.cfg['common']['days']
 
         self.ca = {
             'name': name,
@@ -360,7 +365,8 @@ class CA:
             'crl': fpath('{0}/crl/{1}.crl'.format(basedir, name)),
             'key': fpath('{0}/private/{1}.key'.format(basedir, name)),
             'crt': fpath('{0}/certs/{1}.pem'.format(basedir, name)),
-            'days': 60*60*24*days,
+            'bundle': fpath('{0}/certs/{1}-bundle.pem'.format(basedir, name)),
+            'days': days,
             'db': fpath('{0}/db/{1}.db'.format(basedir, name)),
             'db_attr': fpath('{0}/db/{1}-db.attr'.format(basedir, name)),
             'crt_idx': fpath('{0}/db/{1}-crt.idx'.format(basedir, name)),
@@ -375,7 +381,8 @@ class CA:
 
         @returns:   str String containing the timestamp
         """
-        future_date = time.localtime(time.time() + self.ca['days'])
+        days_s = self.ca['days'] * (60*60*24)
+        future_date = time.localtime(time.time() + days_s)
         return time.strftime('%Y%m%d%H%M%SZ', future_date)
 
     def setup(self):
@@ -422,6 +429,11 @@ class CA:
 
     def initca(self):
         """ initca      Empty function to be implemented by subclasses
+        """
+        warning('Feature not implemented')
+
+    def updatebundle(self):
+        """ updatebundle:   Update the certificate bundle for this CA
         """
         warning('Feature not implemented')
 
@@ -527,6 +539,15 @@ class IntermediaryCA(CA):
         info('Generating certificate for {0} CA'.format(self.ca['name']))
         parent.sign_intermediary(self.ca['csr'], self.ca['crt'])
 
+    def updatebundle(self, parent=None):
+        """ updatebundle:   Update the certificate bundle for this CA
+        """
+        info('Updating certificate bundle for {0} CA'.format(self.ca['name']))
+        parent_bundle = parent.ca['crt']
+        bundle = open(self.ca['crt'], 'r').read()
+        bundle += open(parent_bundle, 'r').read()
+        open(self.ca['bundle'], 'w').write(bundle)
+
 
 class AutosignCA(CA):
     """ AutosignCA:     Class implementing the autosign CA
@@ -559,6 +580,15 @@ class AutosignCA(CA):
 
         info('Generating certificate for {0} CA'.format(self.ca['name']))
         parent.sign_intermediary(self.ca['csr'], self.ca['crt'])
+
+    def updatebundle(self, parent=None):
+        """ updatebundle:   Update the certificate bundle for this CA
+        """
+        info('Updating certificate bundle for {0} CA'.format(self.ca['name']))
+        parent_bundle = parent.ca['bundle']
+        bundle = open(self.ca['crt'], 'r').read()
+        bundle += open(parent_bundle, 'r').read()
+        open(self.ca['bundle'], 'w').write(bundle)
 
 
 if __name__ == '__main__':
@@ -624,11 +654,13 @@ if __name__ == '__main__':
     intermediary.setup()
     intermediary.initca(parent=root)
     intermediary.updatecrl()
+    intermediary.updatebundle(parent=root)
 
     autosign = AutosignCA(config)
     autosign.setup()
     autosign.initca(parent=intermediary)
     autosign.updatecrl()
+    autosign.updatebundle(parent=intermediary)
 
     # Restore original umask
     os.umask(old_umask)

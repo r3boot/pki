@@ -12,6 +12,7 @@ common:
     city: Amersfoort
     organization: AS65342
     unit: PKI services
+    days: 3652
 
 crypto:
     algo: rsa
@@ -27,3 +28,4 @@ intermediary:
 autosign:
     cn: AS65342 Infrastructure CA
     unit: Autosign
+    days: 365
