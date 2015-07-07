@@ -12,8 +12,7 @@ import shlex
 import socket
 import subprocess
 import sys
-import threading
-import time
+
 
 if os.uname()[0] == 'OpenVMS':
     import commands
@@ -100,13 +99,13 @@ api:
     token: ${client_token}
 
 certs:
-    bits: 4096
-    hash: sha512
-    country: NL
-    province: Utrecht
-    city: Amersfoort
-    organization: AS65342
-    unit: Autosign
+    bits: ${crypto['bits']}
+    hash: ${crypto['hash']}
+    country: ${ca['country']}
+    province: ${ca['province']}
+    city: ${ca['city']}
+    organization: ${ca['organization']}
+    unit: ${ca['unit']}
 """
 
 
@@ -694,6 +693,8 @@ class AutosignAPI:
             server_host=ipaddr,
             server_port=4392,
             client_token=token,
+            ca=ca.cfg['common'],
+            crypto=ca.cfg['crypto'],
         )
         return cfg_data
 
