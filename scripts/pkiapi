@@ -499,6 +499,7 @@ class AutosignCA:
             'name': name,
             'workspace': self.cfg['common']['workspace'],
             'basedir': basedir,
+            'htmldir': '{0}/html'.format(self.cfg['common']['workspace']),
             'baseurl': self.cfg['common']['baseurl'],
             'cfg': fpath('{0}/cfg/{1}.cfg'.format(basedir, name)),
             'csr': fpath('{0}/csr/{1}.csr'.format(basedir, name)),
@@ -636,7 +637,13 @@ class AutosignAPI:
         self._port = port
 
         self._app = bottle.Bottle()
-        self._app.route('/', method='get', callback=self.index)
+        self._app.route('/', method='get', callback=self.download_index)
+        self._app.route('/imgs/<fname>', method='get',
+                        callback=self.download_img)
+        self._app.route('/certs/<fname>', method='get',
+                        callback=self.download_cert)
+        self._app.route('/crl/<fname>', method='get',
+                        callback=self.download_crl)
         self._app.route('/v1/token', method='post',
                         callback=self.generate_token)
         self._app.route('/v1/sign', method='post',
@@ -752,6 +759,44 @@ class AutosignAPI:
         os.unlink(fd.name)
 
         info('Revoked the certificate for {0}'.format(fqdn))
+
+    def download_index(self):
+        """ download_index:     Helper function which returns an index.html
+
+        @return:    html    The index.html hosted by this API, or 404 if it
+                            is not found
+        """
+        return bottle.static_file('index.html', ca.ca['htmldir'])
+
+    def download_img(self, fname):
+        """ download_img:       Helper function which returns a png
+
+        @return:    png     The png hosted by this API, or 404 if it was not
+                            found
+        """
+        root = '{0}/imgs'.format(ca.ca['htmldir'])
+        return bottle.static_file(fname, root=root, mimetype='image/png')
+
+    def download_cert(self, fname):
+        """ download_cert:      Helper function which returns a x509 cert
+
+        @return:    pem     The requested certificate, or 404 if it was not
+                            found
+        """
+        root = '{0}/certs'.format(ca.ca['htmldir'])
+        if fname == 'as65342-bundle.pem':
+            fname = 'as65342-autosign-bundle.pem'
+        return bottle.static_file(fname, root=root,
+                                  mimetype='application/x-pem-file')
+
+    def download_crl(self, fname):
+        """ download_crl:       Helper function which downloads a CRL
+
+        @return:    crl     The requested CRL, or 404 if it was not found
+        """
+        root = '{0}/crl'.format(ca.ca['htmldir'])
+        return bottle.static_file(fname, root=root,
+                                  mimetype='application/x-pkcs7-crl')
 
     def run(self):
         """ run:    Start the CA service

@@ -4,5 +4,5 @@ $!
 $!
 $ write sys$output "[+] Starting AS65342 PKI API"
 $ set def cluster:[temp.pki]
-$ python [.scripts]pkiapi.py -d -f ./config/pki.yml -w ./store -l 10.42.15.17
+$ python [.scripts]pkiapi.py -d -f ./config/pki.yml -l ./config/logging.yml -w ./store -i 10.42.15.17
 $!

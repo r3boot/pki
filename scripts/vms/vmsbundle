@@ -305,6 +305,7 @@ if __name__ == '__main__':
     libdir = '{0}/lib'.format(workspace)
     cfgdir = '{0}/config'.format(workspace)
     pkidir = '{0}/store'.format(workspace)
+    htmldir = '{0}/html'.format(pkidir)
 
     # Setup the variables which will be used under OpenVMS
     ca_name = 'as65342-autosign'
@@ -338,7 +339,13 @@ if __name__ == '__main__':
     }
 
     # Create working directories
-    for directory in [workspace, scriptdir, libdir, cfgdir, pkidir]:
+    for directory in [workspace, scriptdir, libdir, cfgdir, pkidir, htmldir]:
+        debug('Creating {0}'.format(directory))
+        os.mkdir(directory)
+
+    # Create html directories
+    for d in ['imgs', 'certs', 'crl']:
+        directory = '{0}/{1}'.format(htmldir, d)
         debug('Creating {0}'.format(directory))
         os.mkdir(directory)
 
@@ -387,6 +394,50 @@ if __name__ == '__main__':
     dest = '{0}/bottle.py'.format(libdir)
     debug('Installing {0}'.format(dest))
     shutil.copy(bottle_py, dest)
+
+    # Copy index.html
+    index_html = '{0}/html/index.html'.format(basedir)
+    dest = '{0}/index.html'.format(htmldir)
+    debug('Installing {0}'.format(dest))
+    shutil.copy(index_html, dest)
+
+    # Copy images
+    for img in ['duck.png', 'favicon.png']:
+        src = '{0}/html/{1}'.format(basedir, img)
+        dest = '{0}/imgs/{1}'.format(htmldir, img)
+        debug('Installing {0}'.format(dest))
+        shutil.copy(src, dest)
+
+    # Copy certificates in place
+    base_workspace = '{0}/workspace'.format(basedir)
+    root = '{0}/as65342-root/certs/as65342-root.pem'.format(base_workspace)
+    inter = '{0}/as65342-intermediary/certs/as65342-intermediary.pem'.format(
+        base_workspace
+    )
+    inter_bundle = inter.replace('.pem', '-bundle.pem')
+    autosign = '{0}/as65342-autosign/certs/as65342-autosign.pem'.format(
+        base_workspace
+    )
+    autosign_bundle = autosign.replace('.pem', '-bundle.pem')
+    for crt in [root, inter, inter_bundle, autosign, autosign_bundle]:
+        fname = os.path.basename(crt)
+        dest = '{0}/certs/{1}'.format(htmldir, fname)
+        debug('Installing {0}'.format(dest))
+        shutil.copy(crt, dest)
+
+    # Copy revocation lists in place
+    root = '{0}/as65342-root/crl/as65342-root.crl'.format(base_workspace)
+    inter = '{0}/as65342-intermediary/crl/as65342-intermediary.crl'.format(
+        base_workspace
+    )
+    autosign = '{0}/as65342-autosign/crl/as65342-autosign.crl'.format(
+        base_workspace
+    )
+    for crl in [root, inter, autosign]:
+        fname = os.path.basename(crl)
+        dest = '{0}/crl/{1}'.format(htmldir, fname)
+        debug('Installing {0}'.format(dest))
+        shutil.copy(crl, dest)
 
     # Create a zipfile containing the bundle
     debug('Creating {0}'.format(args.zipfile))

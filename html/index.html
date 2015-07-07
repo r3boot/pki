@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="">
+    <meta name="author" content="">
+    <title>AS65342 PKI service</title>
+    <link rel="icon" type="image/png" href="/imgs/favicon.png">
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      a {
+        text-decoration: none;
+      }
+      .img-middle {
+        margin-top: 10px;
+        vertical-align: bottom;
+      }
+      .span-middle {
+        margin: auto;
+        position: relative;
+        vertical-align: middle;
+        font-weight: bold;
+        font-size: 20px;
+      }
+      .container {
+        position: relative;
+        width: 100%;
+      }
+      .center {
+        margin: auto;
+        width: 60%;
+        border: 3px solid #8AC007;
+        margin-top: 20px;
+        padding 10px;
+      }
+      .left {
+        margin-top: 20px;
+        margin-left: 50px;
+        margin-right: 40px;
+        margin-bottom: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="center">
+      <div align="center">
+        <div>
+          <img class="img-middle" src="/imgs/duck.png" />
+          <span class="span-middle">AS65342 PKI service</span>
+          <hr width="80%"/>
+        </div>
+      </div>
+      <div class="left">
+        <p/><h4>Introduction</h4>
+        You have reached the AS65342 PKI service. From this page, you can
+        learn more about this service, and download the various certificate
+        bundles that are available through this service. You will need to have
+        these certificate bundles installed if you want to use any of the
+        AS65342 services which have TLS enabled.
+        <p/><h4>PKI Structure</h4>
+        The AS65342 PKI is build out of a 3 layered PKI. The as65342-root CA
+        is used as the basis of this PKI, and it's key is stored offline. Below
+        the as65342-root CA is the as65342-intermediary CA, which is used to
+        sign the various production CA's in place inside the AS65342 network.
+        Currently, only one production CA is in place, the as65342-autosign CA.
+        <p/><h4>Download CA certificates and revocation lists</h4>
+        Click here to download the full CA bundle: <a href="/certs/as65342-bundle.pem">AS65342 CA bundle</a>
+        <p/>Alternatively, you can download all the certificates separately:<br/>
+        <ul>
+          <li><a href="/certs/as65342-root.pem">Root CA</a></li>
+          <li><a href="/certs/as65342-intermediary.pem">Intermediary CA</a> (<a href="/certs/as65342-intermediary-bundle.pem">bundle</a>)</li>
+          <li><a href="/certs/as65342-autosign.pem">Autosign CA</a> (<a href="/certs/as65342-autosign-bundle.pem">bundle</a>)</li>
+        </ul>
+        <p/>You can also download the certificate revocation lists for his PKI:<br/>
+        <ul>
+          <li><a href="/crl/as65342-root.crl">CRL for Root CA</a></li>
+          <li><a href="/crl/as65342-intermediary.crl">CRL for Intermediary CA</a>
+          <li><a href="/crl/as65342-autosign.crl">CRL for Autosign CA</a>
+        </ul>
+      </div>
+    </div>
+  </body>
+</html>
