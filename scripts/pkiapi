@@ -12,6 +12,8 @@ import shlex
 import socket
 import subprocess
 import sys
+import threading
+import time
 
 if os.uname()[0] == 'OpenVMS':
     import commands
@@ -512,6 +514,7 @@ class AutosignCA:
             'crl': fpath('{0}/crl/{1}.crl'.format(basedir, name)),
             'key': fpath('{0}/private/{1}.key'.format(basedir, name)),
             'crt': fpath('{0}/certs/{1}.pem'.format(basedir, name)),
+            'bundle': fpath('{0}/certs/{1}-bundle.pem'.format(basedir, name)),
             'db': fpath('{0}/db/{1}.db'.format(basedir, name)),
             'db_attr': fpath('{0}/db/{1}-db.attr'.format(basedir, name)),
             'crt_idx': fpath('{0}/db/{1}-crt.idx'.format(basedir, name)),
@@ -523,8 +526,8 @@ class AutosignCA:
         if C_OSNAME == 'OpenVMS':
             self._vms_basedir = fdir(basedir)
 
-    def _vmsdir(self, name):
-        """ _vmsdir:    Helper function to create a path used for vms cli paths
+    def vmsdir(self, name):
+        """ vmsdir:    Helper function to create a path used for vms cli paths
 
         @param:     name    String containing the path to convert
         @return:    str     Converted path
@@ -537,8 +540,8 @@ class AutosignCA:
         """ updatecrl:  Updates the Certificate Revocation list for this CA
         """
         info('Generating crl for {0} CA'.format(self.ca['name']))
-        cfg = self._vmsdir(self.ca['cfg'])
-        crl = self._vmsdir(self.ca['crl'])
+        cfg = self.vmsdir(self.ca['cfg'])
+        crl = self.vmsdir(self.ca['crl'])
         cmdline = 'openssl ca -gencrl -config {0} -out {1}'.format(
             cfg, crl
         )
@@ -556,9 +559,9 @@ class AutosignCA:
         @param:     crt Path to the generated certificate
         """
         info('Signing certificate using {0} CA'.format(self.ca['name']))
-        cfg = self._vmsdir(self.ca['cfg'])
-        csr = self._vmsdir(fpath(csr))
-        crt = self._vmsdir(fpath(crt))
+        cfg = self.vmsdir(self.ca['cfg'])
+        csr = self.vmsdir(fpath(csr))
+        crt = self.vmsdir(fpath(crt))
         cmdline = 'openssl ca -config {0} -in {1} -out {2}'.format(
             cfg, csr, crt
         )
@@ -576,8 +579,8 @@ class AutosignCA:
         @param:     crt Path to certificate to revoke
         """
         info('Revoking certificate using {0} CA'.format(self.ca['name']))
-        cfg = self._vmsdir(self.ca['cfg'])
-        crt = self._vmsdir(fpath(crt))
+        cfg = self.vmsdir(self.ca['cfg'])
+        crt = self.vmsdir(fpath(crt))
         cmdline = 'openssl ca -config {0} -revoke {1}'.format(
             cfg, crt
         )
@@ -830,7 +833,10 @@ if __name__ == '__main__':
 
     ca = AutosignCA(config)
     api = AutosignAPI(host=args.host, port=args.port)
-    api.run()
+    try:
+        api.run()
+    except KeyboardInterrupt:
+        pass
 
     # Restore original umask
     os.umask(old_umask)

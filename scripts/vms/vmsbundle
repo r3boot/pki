@@ -299,6 +299,12 @@ if __name__ == '__main__':
     ca_name = 'as65342-autosign'
     ca_dir = '{0}/store/{1}'.format(args.destdir, ca_name)
 
+    days = 60*60*24*365*10
+    if 'days' in config['autosign']:
+        days = config['autosign']['days']
+    else:
+        days = config['common']['days']
+
     # Setup the variables to be used in the template
     ca = {
         'name': 'as65342-autosign',
@@ -311,6 +317,7 @@ if __name__ == '__main__':
         'city': config['common']['city'],
         'organization': config['common']['organization'],
         'unit': config['common']['unit'],
+        'days': days,
         'crt': fpath('{0}/certs/{1}.pem'.format(ca_dir, ca_name)),
         'key': fpath('{0}/private/{1}.key'.format(ca_dir, ca_name)),
         'certs': fpath('{0}/certs'.format(ca_dir, ca_name), is_dir=True),
