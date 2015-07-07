@@ -4,6 +4,8 @@ import argparse
 import glob
 import hashlib
 import json
+import logging
+import logging.config
 import os
 import platform
 import random
@@ -63,6 +65,7 @@ if C_OSNAME == 'OpenVMS':
 # Various default values used as CLI arguments
 _d_debug = False
 _d_cfgfile = '/etc/pki/server.yml'
+_d_logcfg = '/etc/pki/logging.yml'
 _d_workspace = '/etc/pki'
 _d_host = 'localhost'
 _d_port = 4392
@@ -83,8 +86,8 @@ _subject_to_yaml = {
 ca = None
 
 
-# Global variable used to indicate if debugging is enabled
-enable_debug = _d_debug
+# Global variable containing the python logger
+logger = None
 
 
 # Global variable used to indicate if permissive mode needs to be enabled
@@ -175,21 +178,12 @@ def run(cmd, stdin=False, stdout=False):
                             stderr=stdout_fd)
 
 
-def print_message(prefix, message):
-    """ print_message:      Prints a message on the screen using a prefix
-
-    @param:     prefix      Prefix to use
-    @param:     message     Message to display
-    """
-    print('{0} {1}'.format(prefix, message))
-
-
 def info(message):
     """ info:           Display an informational message
 
     @param:     message Message to display
     """
-    print_message('[+]', message)
+    logging.info(message)
 
 
 def warning(message):
@@ -197,7 +191,7 @@ def warning(message):
 
     @param:     message Message to display
     """
-    print_message('[W]', message)
+    logging.warning(message)
 
 
 def debug(message):
@@ -205,9 +199,7 @@ def debug(message):
 
     @param:     message Message to display
     """
-    if not enable_debug:
-        return
-    print_message('[D]', message)
+    logging.debug(message)
 
 
 def error(message):
@@ -215,7 +207,7 @@ def error(message):
 
     @param:     message Message to display
     """
-    print_message('[E]', message)
+    logging.error(message)
     sys.exit(1)
 
 
@@ -777,6 +769,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__description__)
     parser.add_argument('-d', dest='debug', action='store_true',
                         default=_d_debug, help='Enable debugging')
+    parser.add_argument('-l', dest='log_cfgfile', action='store',
+                        type=str, default=_d_logcfg,
+                        help='File containing the configuration for logging')
     parser.add_argument('-f', dest='cfgfile', action='store',
                         type=str, default=_d_cfgfile,
                         help='Configuration file to use ({0})'.format(
@@ -784,7 +779,7 @@ if __name__ == '__main__':
                         ))
     parser.add_argument('-w', dest='workspace', action='store',
                         help='Override location where to store data')
-    parser.add_argument('-l', dest='host', action='store',
+    parser.add_argument('-i', dest='host', action='store',
                         type=str, default=_d_host,
                         help='Ip address on which to bind the PKI service')
     parser.add_argument('-p', dest='port', action='store',
@@ -794,8 +789,15 @@ if __name__ == '__main__':
                         default=_d_permissive, help='Enable permissive mode')
     args = parser.parse_args()
 
-    # Initialize debug logging
-    enable_debug = args.debug
+    # Exit if we cannot find the configuration file for logging
+    if not os.path.exists(args.log_cfgfile):
+        print('Cannot find {0}, exiting'.format(args.log_cfgfile))
+        sys.exit(1)
+    log_cfg = yaml.load(open(args.log_cfgfile, 'r').read())
+
+    # Setup logging framework
+    logging.config.dictConfig(log_cfg)
+    logger = logging.getLogger('pkiapi')
 
     # Initialize permissive mode
     enable_permissive = args.permissive

@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 
 import argparse
+import logging
+import logging.config
 import os
 import platform
 import shutil
@@ -34,8 +36,13 @@ __url__ = 'https://gitlab.as65342.net/r3boot/pki'
 # Various default values used as CLI arguments
 _d_debug = False
 _d_cfgfile = '/etc/pki/server.yml'
+_d_logcfg = '/etc/pki/logging.yml'
 _d_destdir = '/cluster/temp/pki'
 _d_bundle = './pki-vms.zip'
+
+
+# Global variable containing the python logger
+logger = None
 
 
 # Template containing openssl.cfg which can be used under VMS
@@ -190,21 +197,12 @@ def fpath(somepath, is_dir=False):
     return ddcu
 
 
-def print_message(prefix, message):
-    """ print_message:      Prints a message on the screen using a prefix
-
-    @param:     prefix      Prefix to use
-    @param:     message     Message to display
-    """
-    print('{0} {1}'.format(prefix, message))
-
-
 def info(message):
     """ info:           Display an informational message
 
     @param:     message Message to display
     """
-    print_message('[+]', message)
+    logger.info(message)
 
 
 def warning(message):
@@ -212,7 +210,7 @@ def warning(message):
 
     @param:     message Message to display
     """
-    print_message('[W]', message)
+    logger.warning(message)
 
 
 def debug(message):
@@ -220,9 +218,7 @@ def debug(message):
 
     @param:     message Message to display
     """
-    if not enable_debug:
-        return
-    print_message('[D]', message)
+    logger.debug(message)
 
 
 def error(message):
@@ -230,7 +226,7 @@ def error(message):
 
     @param:     message Message to display
     """
-    print_message('[E]', message)
+    logger.error(message)
     sys.exit(1)
 
 
@@ -241,6 +237,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__description__)
     parser.add_argument('-d', dest='debug', action='store_true',
                         default=_d_debug, help='Enable debugging')
+    parser.add_argument('-l', dest='log_cfgfile', action='store',
+                        type=str, default=_d_logcfg,
+                        help='File containing the configuration for logging')
     parser.add_argument('-f', dest='cfgfile', action='store',
                         type=str, default=_d_cfgfile,
                         help='Path to PKI configuration file')
@@ -252,8 +251,20 @@ if __name__ == '__main__':
                         help='Path to output zipfile')
     args = parser.parse_args()
 
-    # Setup logging
-    enable_debug = args.debug
+    # Exit if we cannot find the configuration file for logging
+    if not os.path.exists(args.log_cfgfile):
+        print('Cannot find {0}, exiting'.format(args.log_cfgfile))
+        sys.exit(1)
+    log_cfg = yaml.load(open(args.log_cfgfile, 'r').read())
+
+    # Setup logging framework
+    logging.config.dictConfig(log_cfg)
+    logger = logging.getLogger('bundler')
+
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(logging.INFO)
 
     # Setup the base directory for copying
     basedir = os.getcwd()
@@ -366,6 +377,12 @@ if __name__ == '__main__':
     debug('Installing {0}'.format(dest))
     shutil.copy(autosign_cfg, dest)
 
+    # Copy the pki logging configuration
+    logging_cfg = '{0}/config/logging.yml'.format(basedir)
+    dest = '{0}/logging.yml'.format(cfgdir)
+    debug('Installing {0}'.format(dest))
+    shutil.copy(logging_cfg, dest)
+
     # Copy bottle.py
     dest = '{0}/bottle.py'.format(libdir)
     debug('Installing {0}'.format(dest))
@@ -377,18 +394,16 @@ if __name__ == '__main__':
         oldcwd = os.getcwd()
         os.chdir(tmpdir)
         for cur_dir, directories, files in os.walk(tmpdir):
-            debug('Entering {0}'.format(cur_dir))
             for f in files:
                 fname = '{0}/{1}'.format(cur_dir.replace(tmpdir, '.'), f)
-                debug('Adding file {0}'.format(fname))
+                debug('Adding {0}'.format(fname))
                 fd.write(fname)
             for d in directories:
                 dname = '{0}/{1}'.format(cur_dir.replace(tmpdir, '.'), d)
-                debug('Adding directory {0}'.format(dname))
+                debug('Adding {0}'.format(dname))
                 fd.write(dname)
         os.chdir(oldcwd)
+    info('Generated {0}'.format(args.zipfile))
 
     debug('Removing {0}'.format(tmpdir))
     shutil.rmtree(tmpdir)
-
-    info('Generated {0}'.format(args.zipfile))

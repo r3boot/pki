@@ -1,0 +1,44 @@
+---
+# This file contains the logging setup for the AS65342 PKI software
+
+version: 1
+formatters:
+  stdout:
+    format: '[%(levelname)8s]: %(message)s'
+  logfile:
+    format: '%(asctime)s [%(levelname)8s]: %(message)s'
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    level: DEBUG
+    formatter: stdout
+    stream: ext://sys.stdout
+  logfile:
+    class: logging.handlers.RotatingFileHandler
+    formatter: logfile
+    filename: pkiapi.log
+    maxBytes: 102400
+    backupCount: 3
+
+loggers:
+  initpki:
+    level: DEBUG
+    handlers: [console]
+    propagate: no
+  pkiapi:
+    level: DEBUG
+    handlers: [console, logfile]
+  pkiclient:
+    level: DEBUG
+    handlers: [console]
+    propagate: no
+  bundler:
+    level: DEBUG
+    handlers: [console]
+    propagate: no
+
+root:
+  level: DEBUG
+  handlers: [console]
+
