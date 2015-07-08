@@ -442,7 +442,7 @@ class CA:
             fpath(self.ca['crl']),
         )
         if pwfile:
-            cmdline += ' -passin {0}'.format(pwfile)
+            cmdline += ' -passin file:{0}'.format(pwfile)
         os.chdir(self.basedir)
         proc = run(cmdline)
         proc.communicate()
