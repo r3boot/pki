@@ -343,15 +343,10 @@ class APIClient:
         @param:     fqdn    Fully-Qualified Domain-Name to be revoked
         """
         path = '/v1/revoke'
-        crt = '{0}/certs/{1}.pem'.format(self._cfg['workspace'], fqdn)
-        if not os.path.exists(crt):
-            error('{0} does not exist'.format(crt))
-        crt_data = open(crt, 'r').read()
 
         payload = {
             'fqdn': fqdn,
             'hostname': socket.gethostname(),
-            'crt': crt_data,
             'token': self._cfg['api']['token'],
         }
         response = self.delete(path, payload=payload)
