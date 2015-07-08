@@ -666,7 +666,7 @@ if __name__ == '__main__':
 
     # Check if workspace directory exists
     if not os.path.exists(config['common']['workspace']):
-        warning('Creating {0}'.format(config['common']['workspace']))
+        debug('Creating {0}'.format(config['common']['workspace']))
         os.mkdir(config['common']['workspace'])
 
     # Ask for the passwords for the Root CA
