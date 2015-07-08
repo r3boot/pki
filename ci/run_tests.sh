@@ -23,7 +23,7 @@ fi
 
 # First, perform code checking and analysis
 info "Running pyling"
-find ${CWD} -name *.py | xargs pylint -f parseable > pylint.log
+pylint -f parseable ./scripts/* ./ci/*.py ./scripts/vms/vmsbundle > pylint.log
 
 # Then, perform a full application test
 if [ -d "${WORKSPACE}" ]; then
