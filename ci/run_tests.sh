@@ -21,6 +21,10 @@ if [ ! -f "./ci/run_tests.sh" ]; then
     error "Invalid PWD"
 fi
 
+# First, perform code checking and analysis
+find ${CWD} -name *.py | xargs pylint -f parseable > pylint.xml
+
+# Then, perform a full application test
 if [ -d "${WORKSPACE}" ]; then
     info "Cleaning up ${WORKSPACE}"
     rm -rf "${WORKSPACE}"
