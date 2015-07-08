@@ -54,7 +54,7 @@ class PKIClient:
         cfg = '{0}/client.yml'.format(workspace)
         logging = '{0}/config/logging.yml'.format(basedir)
         self._cmd = '{0}/scripts/pkiclient -d'.format(basedir)
-        self._cmd += ' -u http://127.0.0.1:4392'
+        self._cmd += ' -u http://127.0.1.1:4392'
         self._cmd += ' -f {0} -l {1} -w {2} -o {2}'.format(
             cfg, logging, workspace
         )
