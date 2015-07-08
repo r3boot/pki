@@ -28,6 +28,7 @@ fi
 
 info "Creating ${WORKSPACE}"
 mkdir -p "${WORKSPACE}"
+mkdir -p "${WORKSPACE}/html/crl"
 
 # Initialize the PKI
 ${INITPKI} -d -f ${CONFIG} -l ${LOGGING} -w ${WORKSPACE} \
