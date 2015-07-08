@@ -22,7 +22,8 @@ if [ ! -f "./ci/run_tests.sh" ]; then
 fi
 
 # First, perform code checking and analysis
-find ${CWD} -name *.py | xargs pylint -f parseable > pylint.xml
+info "Running pyling"
+find ${CWD} -name *.py | xargs pylint -f parseable > pylint.log
 
 # Then, perform a full application test
 if [ -d "${WORKSPACE}" ]; then
