@@ -167,7 +167,7 @@ def warning(message):
 
 
 def debug(message):
-    """ warning:    Display a debug message if debugging is enabled
+    """ debug:    Display a debug message if debugging is enabled
 
     @param:     message Message to display
     """
@@ -175,7 +175,7 @@ def debug(message):
 
 
 def error(message):
-    """ warning:    Display an error message and exit the application
+    """ error:    Display an error message and exit the application
 
     @param:     message Message to display
     """
@@ -587,7 +587,7 @@ if __name__ == '__main__':
         for directory in req_dirs:
             full_dir = '{0}/{1}'.format(args.x509, directory)
             if not os.path.exists(full_dir):
-                warning('Creating {0}'.format(full_dir))
+                debug('Creating {0}'.format(full_dir))
                 try:
                     os.mkdir(full_dir)
                 except OSError as e:
