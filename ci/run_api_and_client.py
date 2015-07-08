@@ -94,5 +94,6 @@ if __name__ == '__main__':
     pkiclient.generate()
 
     info('Revoking certificate')
+    pkiclient.revoke()
 
     pkiapi.stop()
