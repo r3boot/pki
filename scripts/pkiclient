@@ -553,7 +553,7 @@ if __name__ == '__main__':
     # Check if workspace directory exists
     workspace = os.path.abspath(args.workspace)
     if not os.path.exists(workspace):
-        warning('Creating {0}'.format(workspace))
+        debug('Creating {0}'.format(workspace))
         os.mkdir(workspace)
 
     # Request a new token + config file
