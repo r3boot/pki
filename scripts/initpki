@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+import getpass
 import logging
 import logging.config
 import os
@@ -9,6 +10,7 @@ import pprint
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 
 
@@ -46,6 +48,8 @@ _d_logcfg = '/etc/pki/logging.yml'
 _d_workspace = '/etc/pki'
 _d_host = 'localhost'
 _d_port = 4392
+_d_root_pw = None
+_d_inter_pw = None
 
 
 # Global variable containing the python logger
@@ -429,7 +433,7 @@ class CA:
         """
         warning('Feature not implemented')
 
-    def updatecrl(self):
+    def updatecrl(self, pwfile):
         """ updatecrl   Update the Certificate Revocation List for this CA
         """
         info('Generating crl for {0} CA'.format(self.ca['name']))
@@ -437,11 +441,13 @@ class CA:
             fpath(self.ca['cfg']),
             fpath(self.ca['crl']),
         )
+        if pwfile:
+            cmdline += ' -passin {0}'.format(pwfile)
         os.chdir(self.basedir)
         proc = run(cmdline)
         proc.communicate()
 
-    def sign_intermediary(self, csr, crt):
+    def sign_intermediary(self, csr, crt, pwfile):
         """ sign_intermediary:  Perform a intermediary certificate signing
 
         @param:     csr Path to the Certificate Signing Request
@@ -453,6 +459,7 @@ class CA:
             fpath(csr),
             fpath(crt),
         )
+        cmdline += ' -passin file:{0}'.format(pwfile)
         cmdline += ' -extensions intermediate_ca_ext -enddate {0}'.format(
             self.gen_enddate()
         )
@@ -475,14 +482,16 @@ class RootCA(CA):
         """
         CA.__init__(self, config)
 
-    def initca(self):
+    def initca(self, pwfile):
         """ initca:     Generate the key and certificate for this CA
         """
         info('Generating key and csr for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
             self.ca['cfg'], self.ca['csr'], self.ca['key'])
+        cmdline += ' -passout file:{0}'.format(pwfile)
+        debug(cmdline)
         os.chdir(self.basedir)
-        proc = run(cmdline, stdout=True)
+        proc = run(cmdline, stdin=True, stdout=True)
         proc.communicate()
 
         info('Generating certificate for {0} CA'.format(self.ca['name']))
@@ -491,6 +500,7 @@ class RootCA(CA):
             self.ca['csr'],
             self.ca['crt'],
         )
+        cmdline += ' -passin file:{0}'.format(pwfile)
         cmdline += ' -batch -extensions root_ca_ext -enddate {0}'.format(
             self.gen_enddate()
         )
@@ -513,7 +523,7 @@ class IntermediaryCA(CA):
         """
         CA.__init__(self, config)
 
-    def initca(self, parent=None):
+    def initca(self, pwfile, parent=None):
         """ initca:     Generate the intermediary key and sign it with the
                         parent's key
 
@@ -524,12 +534,13 @@ class IntermediaryCA(CA):
         info('Generating key and csr for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
             self.ca['cfg'], self.ca['csr'], self.ca['key'])
+        cmdline += ' -passout file:{0}'.format(pwfile)
         os.chdir(self.basedir)
         proc = run(cmdline, stdout=True)
         proc.communicate()
 
         info('Generating certificate for {0} CA'.format(self.ca['name']))
-        parent.sign_intermediary(self.ca['csr'], self.ca['crt'])
+        parent.sign_intermediary(self.ca['csr'], self.ca['crt'], pwfile)
 
     def updatebundle(self, parent=None):
         """ updatebundle:   Update the certificate bundle for this CA
@@ -555,7 +566,7 @@ class AutosignCA(CA):
         """
         CA.__init__(self, config)
 
-    def initca(self, parent=None):
+    def initca(self, pwfile, parent=None):
         """ initca:     Generate the key for this CA and sign it with the
                         parents key
 
@@ -566,12 +577,13 @@ class AutosignCA(CA):
         info('Generating key and csr for {0} CA'.format(self.ca['name']))
         cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
             self.ca['cfg'], self.ca['csr'], self.ca['key'])
+        cmdline += ' -passout file:{0}'.format(pwfile)
         os.chdir(self.basedir)
         proc = run(cmdline, stdout=True)
         proc.communicate()
 
         info('Generating certificate for {0} CA'.format(self.ca['name']))
-        parent.sign_intermediary(self.ca['csr'], self.ca['crt'])
+        parent.sign_intermediary(self.ca['csr'], self.ca['crt'], pwfile)
 
     def updatebundle(self, parent=None):
         """ updatebundle:   Update the certificate bundle for this CA
@@ -606,6 +618,12 @@ if __name__ == '__main__':
     parser.add_argument('-p', dest='port', action='store',
                         type=int, default=_d_port,
                         help='Port on which to bind the PKI service')
+    parser.add_argument('--root-pw', dest='root_pw', action='store',
+                        type=str, default=_d_root_pw,
+                        help='Password for Root CA')
+    parser.add_argument('--inter-pw', dest='inter_pw', action='store',
+                        type=str, default=_d_inter_pw,
+                        help='Password for Intermediary CA')
     args = parser.parse_args()
 
     # Exit if we cannot find the configuration file for logging
@@ -652,22 +670,82 @@ if __name__ == '__main__':
         warning('Creating {0}'.format(config['common']['workspace']))
         os.mkdir(config['common']['workspace'])
 
+    # Ask for the passwords for the Root CA
+    root_pw = None
+    if args.root_pw:
+        root_pw = args.root_pw
+    else:
+        i = 0
+        while True:
+            if i >= 3:
+                error('Too many failed passwords')
+
+            root_pw = getpass.getpass('Enter password for Root CA: ')
+            root_pw2 = getpass.getpass('Enter password for Root CA (again): ')
+            if root_pw is None:
+                warning('Password cannot be empty')
+            elif len(root_pw) < 4:
+                warning('Password must be 4 chars minimum')
+            elif root_pw == root_pw2:
+                root_pw2 = None
+                break
+            i += 1
+        if not root_pw:
+            error('No password found for Root CA')
+
+    root_pw_fd = tempfile.NamedTemporaryFile()
+    root_pw_fd.write('{0}\n'.format(root_pw).encode())
+    root_pw_fd.flush()
+    root_pw = root_pw_fd.name
+
+    # Ask for the passwords for the Intermediary CA
+    inter_pw = None
+    if args.inter_pw:
+        inter_pw = args.inter_pw
+    else:
+        i = 0
+        pw2str = 'Enter password for Intermediary CA (again): '
+        while True:
+            if i >= 3:
+                error('Too many failed passwords')
+
+            inter_pw = getpass.getpass('Enter password for Intermediary CA: ')
+            i_pw2 = getpass.getpass(pw2str)
+            if inter_pw is None:
+                warning('Password cannot be empty')
+            elif len(inter_pw) < 4:
+                warning('Password must be 4 chars minimum')
+            elif inter_pw == i_pw2:
+                inter_pw2 = None
+                break
+            i += 1
+        if not inter_pw:
+            error('No password found for Intermediary CA')
+    inter_pw_fd = tempfile.NamedTemporaryFile()
+    inter_pw_fd.write('{0}'.format(inter_pw).encode())
+    inter_pw_fd.flush()
+    inter_pw = inter_pw_fd.name
+
     root = RootCA(config)
     root.setup()
-    root.initca()
-    root.updatecrl()
+    root.initca(root_pw)
+    root.updatecrl(root_pw)
 
     intermediary = IntermediaryCA(config)
     intermediary.setup()
-    intermediary.initca(parent=root)
-    intermediary.updatecrl()
+    intermediary.initca(inter_pw, parent=root)
+    intermediary.updatecrl(inter_pw)
     intermediary.updatebundle(parent=root)
 
     autosign = AutosignCA(config)
     autosign.setup()
-    autosign.initca(parent=intermediary)
-    autosign.updatecrl()
+    autosign.initca(inter_pw, parent=intermediary)
+    autosign.updatecrl(None)
     autosign.updatebundle(parent=intermediary)
+
+    # Cleanup tempfiles
+    root_pw_fd.close()
+    inter_pw_fd.close()
 
     # Restore original umask
     os.umask(old_umask)
