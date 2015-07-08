@@ -489,7 +489,6 @@ class RootCA(CA):
         cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
             self.ca['cfg'], self.ca['csr'], self.ca['key'])
         cmdline += ' -passout file:{0}'.format(pwfile)
-        debug(cmdline)
         os.chdir(self.basedir)
         proc = run(cmdline, stdin=True, stdout=True)
         proc.communicate()
