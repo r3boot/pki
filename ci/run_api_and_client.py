@@ -27,6 +27,7 @@ class PKIAPIThread(threading.Thread):
         self._cmd = '{0}/scripts/pkiapi -d -f {1} -l {2} -w {3}'.format(
             basedir, cfg, logging, workspace
         )
+        self._cmd += ' -i 127.0.1.1'
         threading.Thread.__init__(self)
         self.setDaemon(True)
         self.start()
@@ -45,6 +46,7 @@ class PKIAPIThread(threading.Thread):
             self._proc.kill()
         except ProcessLookupError:
             pass
+
 
 class PKIClient:
     def __init__(self, basedir):
