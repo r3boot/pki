@@ -27,7 +27,7 @@ except ImportError:
 
 # Set module details
 __description__ = 'AS65342 PKI -- VMS bundle generator component'
-__version__ = 0.1
+__version__ = 0.2
 __author__ = 'Lex van Roon'
 __email__ = 'r3boot@r3blog.nl'
 __url__ = 'https://gitlab.as65342.net/r3boot/pki'
