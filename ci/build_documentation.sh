@@ -18,7 +18,7 @@ fi
 pushd doc >/dev/null 2>&1
 
 info "Generating documentation"
-make html
+make clean html
 
 info "Installing documentation"
 rsync -avl --delete ./build/html/* ${DEST}/
