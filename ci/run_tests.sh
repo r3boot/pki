@@ -44,8 +44,3 @@ ${INITPKI} -d -f ${CONFIG} -l ${LOGGING} -w ${WORKSPACE} \
 
 # Check files created by the tests
 ./ci/check_expected_files.sh
-
-# Generate documentation
-pushd doc >/dev/null 2>&1
-make html
-popd >/dev/null 2>&1
