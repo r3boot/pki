@@ -17,7 +17,7 @@ handlers:
   logfile:
     class: logging.handlers.RotatingFileHandler
     formatter: logfile
-    filename: pkiapi.log
+    filename: pki.log
     maxBytes: 102400
     backupCount: 3
 
@@ -36,6 +36,10 @@ loggers:
   bundler:
     level: DEBUG
     handlers: [console]
+    propagate: no
+  unittest:
+    level: DEBUG
+    handlers: [logfile]
     propagate: no
 
 root:

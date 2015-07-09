@@ -10,7 +10,10 @@ Contents:
 
 .. toctree::
    :maxdepth: 2
-
+  
+   introduction
+   apidocs
+   
 
 
 Indices and tables
