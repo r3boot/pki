@@ -1,142 +1,150 @@
-class CA:
-    """ CA:     Class representing a Certificate Authority
+"""
+.. module:: __init__
+  :platform: Unix, VMS
+  :synopsis: Module containing a base implementation for a CA
+
+.. moduleauthor:: Lex van Roon <r3boot@r3blog.nl>
+"""
+import os
+import sys
+
+try:
+    import mako.template
+except ImportError:
+    print('Failed to import mako, please run "pip install mako"')
+    sys.exit(1)
+
+from pkilib import utils
+from pkilib import log
+from pkilib import ssl
+
+CA_PARENT = 'parent'
+CA_ROOT = 'root'
+CA_INTERMEDIARY = 'intermediary'
+CA_AUTOSIGN = 'autosign'
+
+
+class ParentCA(ssl.OpenSSL):
+    """Class representing a Certificate Authority. This is a wrapper around the
+    OpenSSL class.
+
+    :param config: Dictionary containing the contents of the config file
+    :type  config: dict
     """
-    ca_type = None
-    ca = {}
+    ca_type = CA_PARENT
+    ca_data = {}
+    days = 60*60*365*10
 
     def __init__(self, config):
-        """ __init__:   Initializes CA class
-
-        @param:     config  Dictionary containing the contents of the
-                            configuration file
-        """
-        self.cfg = config
-        name = '{0}-{1}'.format(self.cfg['common']['name'], self.ca_type)
-        basedir = '{0}/{1}'.format(self.cfg['common']['workspace'], name)
-
         if not self.ca_type:
-            error('ca_type not defined')
+            log.error('ca_type not defined')
 
-        days = 60*60*365*10
-        try:
-            days = self.cfg[self.ca_type]['days']
-        except KeyError:
-            days = self.cfg['common']['days']
+        self.config = config
+        common = config['common']
 
-        self.ca = {
-            'name': name,
-            'type': self.ca_type,
-            'workspace': self.cfg['common']['workspace'],
-            'basedir': basedir,
-            'baseurl': self.cfg['common']['baseurl'],
-            'cfg': fpath('{0}/cfg/{1}.cfg'.format(basedir, name)),
-            'csr': fpath('{0}/csr/{1}.csr'.format(basedir, name)),
-            'crl': fpath('{0}/crl/{1}.crl'.format(basedir, name)),
-            'key': fpath('{0}/private/{1}.key'.format(basedir, name)),
-            'crt': fpath('{0}/certs/{1}.pem'.format(basedir, name)),
-            'bundle': fpath('{0}/certs/{1}-bundle.pem'.format(basedir, name)),
-            'days': days,
-            'db': fpath('{0}/db/{1}.db'.format(basedir, name)),
-            'db_attr': fpath('{0}/db/{1}-db.attr'.format(basedir, name)),
-            'crt_idx': fpath('{0}/db/{1}-crt.idx'.format(basedir, name)),
-            'crl_idx': fpath('{0}/db/{1}-crl.idx'.format(basedir, name)),
+        # Setup base variables
+        self.name = '{0}-{1}'.format(common['name'], self.ca_type)
+        self.workspace = common['workspace']
+        self.basedir = '{0}/{1}'.format(common['workspace'], self.name)
+        self.crtdir = '{0}/certs'.format(self.basedir)
+        cfgdir = '{0}/cfg'.format(self.basedir)
+        csrdir = '{0}/csr'.format(self.basedir)
+        crldir = '{0}/crl'.format(self.basedir)
+        keydir = '{0}/private'.format(self.basedir)
+        dbdir = '{0}/db'.format(self.basedir)
+
+        # Some strings are just too long
+        bundle_name = '{0}/{1}-bundle.pem'.format(self.crtdir, self.name)
+        db_attr_name = '{0}/{1}-db.attr'.format(dbdir, self.name)
+        crt_idx_name = '{0}/{1}-crt.idx'.format(dbdir, self.name)
+        crl_idx_name = '{0}/{1}-crl.idx'.format(dbdir, self.name)
+
+        # Bundle ca details into a dictionary
+        self.ca_data = {
+            'baseurl': common['baseurl'],
+            'ocspurl': common['ocspurl'],
+            'cfg': utils.fpath('{0}/{1}.cfg'.format(cfgdir, self.name)),
+            'csr': utils.fpath('{0}/{1}.csr'.format(csrdir, self.name)),
+            'crl': utils.fpath('{0}/{1}.crl'.format(crldir, self.name)),
+            'key': utils.fpath('{0}/{1}.key'.format(keydir, self.name)),
+            'crt': utils.fpath('{0}/{1}.pem'.format(self.crtdir, self.name)),
+            'bundle': utils.fpath(bundle_name),
+            'db': utils.fpath('{0}/{1}.db'.format(dbdir, self.name)),
+            'db_attr': utils.fpath(db_attr_name),
+            'crt_idx': utils.fpath(crt_idx_name),
+            'crl_idx': utils.fpath(crl_idx_name),
         }
-        self.name = name
-        self.basedir = os.path.abspath(basedir)
-        self.ca_directories = ['certs', 'cfg', 'crl', 'csr', 'db', 'private']
 
-    def gen_enddate(self):
-        """ gen_enddate:    Helper function to generate an enddate timestamp
+        try:
+            self.days = self.config[self.ca_type]['days']
+        except KeyError:
+            self.days = common['days']
 
-        @returns:   str String containing the timestamp
-        """
-        days_s = self.ca['days'] * (60*60*24)
-        future_date = time.localtime(time.time() + days_s)
-        return time.strftime('%Y%m%d%H%M%SZ', future_date)
+        if not os.path.exists(self.basedir):
+            os.mkdir(self.basedir)
+
+        ssl.OpenSSL.__init__(
+            self,
+            self.basedir,
+            self.ca_data['cfg'],
+            self.ca_data['crl']
+        )
 
     def setup(self):
-        """ setup:  Initialize the file structure for this CA
+        """Initialize the file structure for this CA
         """
-        info('Setup directories for {0} CA'.format(self.ca['name']))
+        log.info('Setup directories for {0} CA'.format(self.name))
+        ca_directories = ['certs', 'cfg', 'crl', 'csr', 'db', 'private']
 
-        if os.path.exists(self.ca['basedir']):
-            error('{0} already exists'.format(self.ca['basedir']))
-        os.mkdir(self.ca['basedir'])
-
-        for directory in self.ca_directories:
-            fdir = '{0}/{1}'.format(self.ca['basedir'], directory)
+        for directory in ca_directories:
+            fdir = '{0}/{1}'.format(self.basedir, directory)
             if not os.path.exists(fdir):
-                info('Creating {0}/{1}'.format(self.ca['name'], directory))
+                log.info('Creating {0}/{1}'.format(self.name, directory))
                 os.mkdir(fdir)
 
-        info('Initialize databases for {0} CA'.format(self.ca['name']))
-        for empty_file in [self.ca['db'], self.ca['db_attr']]:
+        log.info('Initialize databases for {0} CA'.format(self.name))
+        for empty_file in [self.ca_data['db'], self.ca_data['db_attr']]:
             open(empty_file, 'w').write('')
 
-        for serial_file in [self.ca['crt_idx'], self.ca['crl_idx']]:
+        for serial_file in [self.ca_data['crt_idx'], self.ca_data['crl_idx']]:
             open(serial_file, 'w').write('01\n')
 
-        info('Installing openssl configuration file for {0} CA'.format(
-            self.ca['name']
-        ))
-        cfgfile = '{0}/cfg/{1}.cfg'.format(self.ca['basedir'], self.ca['name'])
+        log.info('Installing configuration file for {0} CA'.format(self.name))
+        cfgfile = '{0}/cfg/{1}.cfg'.format(self.basedir, self.name)
 
         cfg = {}
-        cfg.update(self.cfg['common'])
+        cfg.update(self.config['common'])
 
-        cfg.update(self.cfg[self.ca_type])
+        if self.ca_type != CA_PARENT:
+            cfg.update(self.config[self.ca_type])
+        else:
+            cfg['cn'] = '{0} CA'.format(CA_PARENT)
 
-        cfg['crypto'] = self.cfg['crypto']
-        cfg['basedir'] = '{0}/{1}'.format(self.ca['workspace'], self.name)
+        cfg.update(self.ca_data)
+
+        cfg['crypto'] = self.config['crypto']
+        cfg['basedir'] = self.basedir
         cfg['ca_type'] = self.ca_type
         cfg['name'] = self.name
-        cfg['ca'] = self.ca
+        cfg['days'] = self.days
+        cfg['certsdir'] = self.crtdir
 
-        template = mako.template.Template(root_ca_template)
+        template_file = '{0}/templates/root.template'.format(self.workspace)
+        if not os.path.exists(template_file):
+            log.error('{0} not found'.format(template_file))
+        template_data = open(template_file, 'r').read()
+
+        template = mako.template.Template(template_data)
         cfg_data = template.render(**cfg)
         open(cfgfile, 'w').write('{0}\n'.format(cfg_data))
 
-    def initca(self):
-        """ initca      Empty function to be implemented by subclasses
+    def initca(self, pwfile=None):
+        """Empty function to be implemented by subclasses
         """
-        warning('Feature not implemented')
+        log.warning('Feature not implemented')
 
-    def updatebundle(self):
-        """ updatebundle:   Update the certificate bundle for this CA
+    @staticmethod
+    def updatebundle():
+        """Empty function to be implemented by subclass
         """
-        warning('Feature not implemented')
-
-    def updatecrl(self, pwfile):
-        """ updatecrl   Update the Certificate Revocation List for this CA
-        """
-        info('Generating crl for {0} CA'.format(self.ca['name']))
-        cmdline = 'openssl ca -gencrl -config {0} -out {1}'.format(
-            fpath(self.ca['cfg']),
-            fpath(self.ca['crl']),
-        )
-        if pwfile:
-            cmdline += ' -passin file:{0}'.format(pwfile)
-        os.chdir(self.basedir)
-        proc = run(cmdline)
-        proc.communicate()
-
-    def sign_intermediary(self, csr, crt, pwfile):
-        """ sign_intermediary:  Perform a intermediary certificate signing
-
-        @param:     csr Path to the Certificate Signing Request
-        @param:     crt Path to the output certificate
-        """
-        info('Signing certificate using {0} CA'.format(self.ca['name']))
-        cmdline = 'openssl ca -config {0} -in {1} -out {2} -batch'.format(
-            fpath(self.ca['cfg']),
-            fpath(csr),
-            fpath(crt),
-        )
-        cmdline += ' -passin file:{0}'.format(pwfile)
-        cmdline += ' -extensions intermediate_ca_ext -enddate {0}'.format(
-            self.gen_enddate()
-        )
-        os.chdir(self.basedir)
-        proc = run(cmdline, stdout=True)
-        proc.communicate()
-
+        log.warning('Feature not implemented')

@@ -1,7 +1,10 @@
 *.swp
 *.pyc
 *.log
+*.xml
 */build
 */build/*
 workspace/*
+tests/workspace
+tests/workspace/*
 pki-vms.zip

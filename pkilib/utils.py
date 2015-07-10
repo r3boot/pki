@@ -9,6 +9,7 @@
 import os
 import shlex
 import subprocess
+import time
 
 C_OSNAME = os.uname()[0]
 
@@ -133,5 +134,24 @@ def run(cmd, stdout=False):
     return output
 
 
+def gen_enddate(days):
+    """Utility function to generate a date in the future which gets returned
+    as a string which is usable in openssl.cnf
+
+    >>> gen_enddate(10)
+    20150720010135Z
+
+    :param days:    Number of days in the future to generate the enddate on
+    :type  days:    int
+    :returns:       Date in the future or None if something went wrong
+    :rtype:         str, None
+    """
+    if not isinstance(days, int):
+        return None
+
+    days_sec = days * (60*60*24)
+    future_date = time.localtime(time.time() + days_sec)
+    return time.strftime('%Y%m%d%H%M%SZ', future_date)
+
 if __name__ == '__main__':
-    print(run('uname -s'))
+    print(gen_enddate(10))

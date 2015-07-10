@@ -6,7 +6,7 @@ common:
     name: as65342
     workspace: /etc/pki
     baseurl: http://pki.as65342.net
-    oscpurl: http://oscp.as65342.net
+    ocspurl: http://oscp.as65342.net
     country: NL
     province: Utrecht
     city: Amersfoort

@@ -21,9 +21,15 @@ if [ ! -f "./ci/run_tests.sh" ]; then
     error "Invalid PWD"
 fi
 
-# First, perform code checking and analysis
+# Perform code checking and analysis
 info "Running pyling"
 pylint -f parseable ./scripts/* ./ci/*.py ./scripts/vms/vmsbundle > pylint.log
+
+# Perform unit testing and code coverage
+info "Running unit and coverage tests"
+pushd ./tests >/dev/null 2>&1
+make tests
+popd >/dev/null 2>&1
 
 # Then, perform a full application test
 if [ -d "${WORKSPACE}" ]; then
