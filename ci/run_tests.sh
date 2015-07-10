@@ -49,4 +49,4 @@ mkdir -p "${WORKSPACE}/html/crl"
 #./ci/run_api_and_client.py
 
 # Check files created by the tests
-./ci/check_expected_files.sh
+#./ci/check_expected_files.sh
