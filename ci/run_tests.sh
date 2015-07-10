@@ -22,7 +22,7 @@ if [ ! -f "./ci/run_tests.sh" ]; then
 fi
 
 # Perform code checking and analysis
-info "Running pyling"
+info "Running pylint"
 pylint -f parseable ./scripts/* ./ci/*.py ./scripts/vms/vmsbundle > pylint.log
 
 # Perform unit testing and code coverage
