@@ -42,11 +42,11 @@ mkdir -p "${WORKSPACE}"
 mkdir -p "${WORKSPACE}/html/crl"
 
 # Initialize the PKI
-${INITPKI} -d -f ${CONFIG} -l ${LOGGING} -w ${WORKSPACE} \
-    --root-pw ${CA_PASS} --inter-pw ${CA_PASS}
+#${INITPKI} -d -f ${CONFIG} -l ${LOGGING} -w ${WORKSPACE} \
+#    --root-pw ${CA_PASS} --inter-pw ${CA_PASS}
 
 # Run the API + client to perform CA actions
-./ci/run_api_and_client.py
+#./ci/run_api_and_client.py
 
 # Check files created by the tests
 ./ci/check_expected_files.sh
