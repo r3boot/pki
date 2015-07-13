@@ -22,14 +22,10 @@ if [ ! -f "./ci/run_tests.sh" ]; then
 fi
 
 # Perform code checking and analysis
-info "Running pylint"
-pylint -f parseable ./scripts/* ./ci/*.py ./scripts/vms/vmsbundle > pylint.log
+./ci/run_pylint.sh
 
 # Perform unit testing and code coverage
-info "Running unit and coverage tests"
-pushd ./tests >/dev/null 2>&1
-make tests
-popd >/dev/null 2>&1
+./ci/run_nose.sh
 
 # Then, perform a full application test
 if [ -d "${WORKSPACE}" ]; then

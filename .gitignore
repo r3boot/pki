@@ -5,6 +5,8 @@
 */build
 */build/*
 workspace/*
+.coverage
+cover
 tests/config
 tests/config/*
 tests/workspace

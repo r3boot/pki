@@ -152,6 +152,3 @@ def gen_enddate(days):
     days_sec = days * (60*60*24)
     future_date = time.localtime(time.time() + days_sec)
     return time.strftime('%Y%m%d%H%M%SZ', future_date)
-
-if __name__ == '__main__':
-    print(gen_enddate(10))

@@ -131,17 +131,3 @@ def error(message):
     else:
         LOGGER.error(message)
     raise SystemExit
-
-
-if __name__ == '__main__':
-    LOGGER = get_handler(sys.argv[1], 'unittest')
-    info('This is an informational message')
-    warning('This is a warning message')
-    LOGGER.setLevel(logging.DEBUG)
-    debug('This is a debugging message')
-    LOGGER.setLevel(logging.INFO)
-    debug('This is a debugging message')
-    try:
-        error('This is an error message, check the return code')
-    except SystemExit:
-        print('Got systemexit')
