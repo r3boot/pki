@@ -127,7 +127,7 @@ def run(cmd, stdout=False):
     else:
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-        except FileNotFoundError:
+        except EnvironmentError:
             return None
         proc.wait()
         output = proc.communicate()[0].decode('utf-8')
