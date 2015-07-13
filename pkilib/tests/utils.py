@@ -34,7 +34,6 @@ class test_unix:
     def test_run_uname(self):
         assert utils.run('uname -s').strip() == os.uname()[0]
 
-    @nose.tools.raises(FileNotFoundError)
     def test_run_nonexisting(self):
         assert utils.run('somerandomunknownfilename') == None
 
