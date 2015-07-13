@@ -30,4 +30,6 @@ nosetests -v \
     --cover-html \
     --cover-branches \
     --cover-inclusive \
+    --cover-xml \
+    --with-xunit \
     pkilib/tests/*.py
