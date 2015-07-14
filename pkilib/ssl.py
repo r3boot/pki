@@ -8,13 +8,8 @@
 
 import os
 import sys
-import pprint
 
-try:
-    import mako.template
-except ImportError:
-    print('Failed to import mako, please run "pip install mako"')
-    sys.exit(1)
+import mako.template
 
 sys.path.append('.')
 
@@ -29,12 +24,10 @@ CA_AUTOSIGN = 'autosign'
 class OpenSSL:
     """Class representing a wrapper around the openssl command
 
-    :param basedir: Directory from where to operate the commands
-    :type  basedir: str
-    :param cfg:     Path to the openssl.cfg for this CA
-    :type  cfg:     str
-    :param crl:     Path to the crl for this CA
-    :type  crl:     str
+    :param config:  Dictionary containing the PKI configuration file
+    :type  config:  dict
+    :param ca_type: Type of CA to represent
+    :type  ca_type: str
     """
     ca_data = {}
 
@@ -51,7 +44,7 @@ class OpenSSL:
             'cfg': '{0}/cfg/{1}.cfg'.format(basedir, ca_name),
             'key': '{0}/private/{1}.key'.format(basedir, ca_name),
             'csr': '{0}/csr/{1}.csr'.format(basedir, ca_name),
-            'crt': '{0}/certs/{1}.crt'.format(basedir, ca_name),
+            'crt': '{0}/certs/{1}.pem'.format(basedir, ca_name),
             'crl': '{0}/crl/{1}.crl'.format(basedir, ca_name),
             'db': '{0}/db/{1}.db'.format(basedir, ca_name),
             'db_attr': '{0}/db/{1}.db_attr'.format(basedir, ca_name),
@@ -66,6 +59,16 @@ class OpenSSL:
         self.ca_data['name'] = ca_name
 
     def setup_ca_structure(self):
+        """Creates the directory structure for this CA and initializes it's
+        databases. It will return False for various errors, these include:
+
+        * An existing base directory
+        * A missing root.template
+        * Failure to parse the template
+
+        :returns:   Flag indicating the success of this function
+        :rtype:     bool
+        """
         basedir = self.ca_data['basedir']
         templates = self.ca_data['templates']
         cfg = self.ca_data['cfg']
@@ -114,8 +117,62 @@ class OpenSSL:
 
         return True
 
+    def gen_server_cfg(self, fqdn=None):
+        """Generate configuration data for a TLS server request. When called
+        with a valid fqdn, it will return a string containing the configuration
+        data for a TLS server request. The fqdn can contain two or three
+        elements. It will return False if one of the following conditions is
+        true:
+
+        * The fqdn is invalid
+        * The tls_server.template cannot be found
+        * The template could not be parsed
+
+        :param fqdn:    Fully-Qualified domain-name for the server
+        :type  fqdn:    str
+        :returns:       String containing the configuration, else False
+        :rtype:         str, bool
+        """
+        templates = self.ca_data['templates']
+        server_template = '{0}/tls_server.template'.format(templates)
+
+        if not os.path.exists(server_template):
+            log.warning('{0} does not exist'.format(server_template))
+            return False
+        if fqdn is None:
+            log.warning('Need a fqdn to generate configuration for')
+            return False
+        if fqdn == '':
+            log.warning('Need a fqdn to generate configuration for')
+            return False
+        if '.' not in fqdn:
+            log.warning('Need atleast a two-level fqdn')
+            return False
+        if len(fqdn.split('.')) > 3:
+            log.warning('Number of levels cannot exceed 3')
+            return False
+
+        template_data = open(server_template, 'r').read()
+        template = mako.template.Template(template_data)
+        template_cfg = self.ca_data
+        template_cfg['fqdn'] = fqdn
+        template_cfg['san'] = fqdn.split('.')[0]
+        try:
+            cfg_data = template.render(**template_cfg)
+        except NameError as e:
+            log.warning('Failed to generate configuration: {0}'.format(e))
+            return False
+        return cfg_data
+
     def genkey(self, cfg, name, pwfile=None):
-        """Generate a new key and Certificate Signing Request
+        """Generate a new key and Certificate Signing Request. Cfg is a path
+        pointing towards the configuration file which should be used for the
+        CSR. The name is the name which will be used for this certificate. This
+        function will return False if one of the following conditions is met:
+
+        * The configuration file could not be found
+        * The CSR or key already exists
+        * pwfile is missing (if ca_type is CA_ROOT or CA_INTERMEDIARY)
 
         :param cfg:     Path to the configuration file to be used
         :type  cfg:     str
@@ -156,21 +213,104 @@ class OpenSSL:
         utils.run(cmdline)
         return os.path.exists(key)
 
-    def selfsign(self, name, extension=None, pwfile=None):
-        """Sign a certificate
+    def selfsign(self, name, pwfile=None):
+        """Self-sign a certificate. It expects the following conditions to be
+        true. If one of them is not met, this function will return False:
 
-        :param cfg:         Path to configuration to use for signing
-        :type  cfg:         str
+        * The ca_type is not CA_ROOT
+        * pwfile cannot be found
+        * The CSR or configuration file cannot be found
+        * The certificate already exists
+
         :param name:        Name as mentioned in the CN
         :type  name:        str
-        :param selfsign:    If set to true, make a self-signed certificate
-        :type  selfsign:    bool
         :returns:           True if the certificate was signed, False if not
         :rtype:             bool
         """
         cfg = os.path.abspath(self.ca_data['cfg'])
         csr = '{0}/csr/{1}.csr'.format(self.ca_data['basedir'], name)
         crt = '{0}/certs/{1}.pem'.format(self.ca_data['basedir'], name)
+
+        if self.ca_data['ca_type'] == CA_ROOT:
+            if not pwfile:
+                log.warning('Need a password file')
+                return False
+            else:
+                if not os.path.exists(pwfile):
+                    return False
+        else:
+            log.warning('{0} CA cannot be self-signed'.format(
+                self.ca_data['ca_type']
+            ))
+            return False
+        if not os.path.exists(cfg):
+            log.warning('{0} does not exist'.format(cfg))
+            return False
+        if not os.path.exists(csr):
+            log.warning('{0} does not exist'.format(csr))
+            return False
+        if os.path.exists(crt):
+            log.warning('{0} already exists'.format(crt))
+            return False
+
+        cmdline = 'openssl ca -config {0} -in {1} -out {2} -batch'.format(
+            cfg, csr, crt
+        )
+        cmdline += ' -selfsign -extensions root_ca_ext'
+        cmdline += ' -passin file:{0}'.format(pwfile)
+        utils.run(cmdline)
+        return os.path.exists(crt)
+
+    def updatecrl(self, pwfile=None):
+        """Update the Certificate Revocation List for this CA. It will return
+        False if one of the following conditions is met:
+
+        * pwfile was not found (for ca_type == CA_root or CA_INTERMEDIARY)
+        * The configuration file could not be found
+
+        :param pwfile:  Path to a file containing the password for the CA key
+        :type  pwfile:  str
+        :returns:       True if the CRL was created, else False
+        :rtype:         bool
+        """
+        cfg = os.path.abspath(self.ca_data['cfg'])
+        crl = os.path.abspath(self.ca_data['crl'])
+
+        if self.ca_data['ca_type'] in [CA_ROOT, CA_INTERMEDIARY]:
+            if not pwfile:
+                log.warning('Need a password file')
+                return False
+            else:
+                if not os.path.exists(pwfile):
+                    return False
+        if not os.path.exists(cfg):
+            log.warning('{0} does not exist'.format(cfg))
+            return False
+
+        cmdline = 'openssl ca -gencrl -config {0} -out {1}'.format(cfg, crl)
+        if pwfile:
+            cmdline += ' -passin file:{0}'.format(pwfile)
+        log.debug(utils.run(cmdline))
+        return os.path.exists(crl)
+
+    def sign_intermediary(self, csr, crt, pwfile, days):
+        """Sign an intermediary certificate using this CA. This function will
+        return False when:
+
+        * The configuration file for this CA could not be found
+        * The CSR could not be found
+        * The certificate already exists
+        * pwfile could not be found
+        * days is not a number
+
+        :param csr:     Path to a file containing the CSR for the intermediary
+        :type  csr:     str
+        :param crt:     Path to the output certificate
+        :type  crt:     str
+        :returns:       True if certificate was created, else False
+        :rtype:         bool
+        """
+        cfg = os.path.abspath(self.ca_data['cfg'])
 
         if not os.path.exists(cfg):
             log.warning('{0} does not exist'.format(cfg))
@@ -181,72 +321,17 @@ class OpenSSL:
         if os.path.exists(crt):
             log.warning('{0} already exists'.format(crt))
             return False
-        if self.ca_data['ca_type'] in [CA_ROOT, CA_INTERMEDIARY]:
-            if not pwfile:
-                log.warning('Need a password file')
-                return False
-            else:
-                if not os.path.exists(pwfile):
-                    return False
+        if not os.path.exists(pwfile):
+            log.warning('{0} does not exist'.format(pwfile))
+            return False
+        try:
+            int(days)
+        except ValueError:
+            log.warning('days needs to be a number')
+            return False
 
         cmdline = 'openssl ca -config {0} -in {1} -out {2} -batch'.format(
             cfg, csr, crt
-        )
-        cmdline += ' -selfsign'
-        if extension:
-            cmdline += ' -extensions {0}'.format(extension)
-        if pwfile:
-            cmdline += ' -passin file:{0}'.format(pwfile)
-
-        utils.run(cmdline)
-        return os.path.exists(crt)
-
-    def updatecrl(self, pwfile):
-        """Update the Certificate Revocation List for this CA
-
-        :param pwfile:  Path to a file containing the password for the CA key
-        :type  pwfile:  str
-        :returns:       True if the CRL was created, else False
-        :rtype:         bool
-        """
-        if not os.path.exists(pwfile):
-            log.warning('{0} does not exist'.format(pwfile))
-            return False
-
-        cmdline = 'openssl ca -gencrl -config {0} -out {1}'.format(
-            self._cfg, self._crl
-        )
-
-        cmdline += ' -passin file:{0}'.format(pwfile)
-        utils.run(cmdline)
-        return os.path.exists(self._crl)
-
-    def sign_intermediary(self, csr, crt, pwfile, days):
-        """Sign an intermediary certificate using this CA
-
-        :param csr:     Path to a file containing the CSR for the intermediary
-        :type  csr:     str
-        :param crt:     Path to the output certificate
-        :type  crt:     str
-        :returns:       True if certificate was created, else False
-        :rtype:         bool
-        """
-        basedir = self.ca_data['basedir']
-
-        if not os.path.exists(csr):
-            log.warning('{0} does not exist'.format(csr))
-            return False
-        if os.path.exists(crt):
-            log.warning('{0} already exists'.format(crt))
-            return False
-        if not os.path.exists(pwfile):
-            log.warning('{0} does not exist'.format(pwfile))
-            return False
-
-        cmdline = 'openssl ca -config {0} -in {1} -out {2} -batch'.format(
-            self._cfg,
-            utils.fpath(csr),
-            utils.fpath(crt),
         )
         cmdline += ' -passin file:{0}'.format(pwfile)
         cmdline += ' -extensions intermediate_ca_ext -enddate {0}'.format(
@@ -255,22 +340,44 @@ class OpenSSL:
         utils.run(cmdline)
         return os.path.exists(crt)
 
+    def sign(self, name):
+        """Sign a certificate using this CA. Name must be a valid fqdn. This
+        function will return False if one of the following conditions is met:
 
-if __name__ == '__main__':
-    import yaml
-    CFG_FILE = './workspace/unittest/config/pki.yml'
-    CFG = '/tmp/blah.cfg'
-    NAME = 'test.fqdn'
-    config = yaml.load(open(CFG_FILE, 'r').read())
-    ssl = OpenSSL(config, CA_ROOT)
-    if not ssl.setup_ca_structure():
-        print('Failed to initialize CA')
-        sys.exit(1)
+        * Name is invalid
+        * The configuration file for this CA could not be found
+        * The CSR for name could not be found
+        * The certificate for name already exists
 
-    if not ssl.genkey(os.path.abspath(CFG), NAME, pwfile='/tmp/blah'):
-        print('Failed to generate key')
-        sys.exit(1)
+        :param name:    Name of the certificate to sign
+        :type  name:    str
+        :returns:       True if certificate was created, else False
+        :rtype:         bool
+        """
+        cfg = os.path.abspath(self.ca_data['cfg'])
+        csr = '{0}/csr/{1}.csr'.format(self.ca_data['basedir'], name)
+        crt = '{0}/certs/{1}.pem'.format(self.ca_data['basedir'], name)
 
-    if not ssl.selfsign(NAME, extension='root_ca_ext', pwfile='/tmp/blah'):
-        print('Failed to self-sign csr')
-        sys.exit(1)
+        if name is None:
+            log.warning('Need a fqdn to sign a certificate for')
+            return False
+        if name == '':
+            log.warning('Fqdn cannot be empty')
+            return False
+        if not os.path.exists(cfg):
+            log.warning('{0} does not exist'.format(cfg))
+            return False
+        if not os.path.exists(csr):
+            log.warning('{0} does not exist'.format(csr))
+            return False
+        if os.path.exists(crt):
+            log.warning('{0} already exists'.format(crt))
+            return False
+
+        cmdline = 'openssl ca -config {0} -in {1} -out {2}'.format(
+            cfg, csr, crt
+        )
+        cmdline += ' -batch -extensions server_ext'
+        log.debug(cmdline)
+        log.debug(utils.run(cmdline))
+        return os.path.exists(crt)

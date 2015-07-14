@@ -126,7 +126,8 @@ def run(cmd, stdout=False):
         proc.wait()
     else:
         try:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE)
         except EnvironmentError:
             return None
         proc.wait()

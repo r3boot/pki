@@ -86,7 +86,7 @@ crl_extensions          = crl_ext               # CRL extensions
 countryName             = match
 stateOrProvinceName     = optional
 localityName            = optional
-organizationName        = match
+organizationName        = optional
 organizationalUnitName  = optional
 commonName              = supplied
 

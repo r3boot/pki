@@ -8,13 +8,8 @@
 import logging
 import logging.config
 import os
-import sys
 
-try:
-    import yaml
-except ImportError:
-    print('Failed to import PyYaml, please run "pip install pyyaml"')
-    sys.exit(1)
+import yaml
 
 
 # Global variable containing the system logger

@@ -1,17 +1,17 @@
 ---
-# This file contains the configuration for the AS65342 pki scripting
+# This file contains the configuration for the Test pki scripting
 # infrastructure
 
 common:
-    name: as65342
-    workspace: /etc/pki
-    baseurl: http://pki.as65342.net
-    ocspurl: http://oscp.as65342.net
+    name: test
+    workspace: ./workspace
+    baseurl: http://pki.example.com
+    ocspurl: http://oscp.example.com
     country: NL
-    province: Utrecht
-    city: Amersfoort
-    organization: AS65342
-    unit: PKI services
+    province: Province
+    city: City
+    organization: Test
+    unit: Organizational Unit
     days: 3652
 
 crypto:
@@ -20,12 +20,12 @@ crypto:
     hash: sha512
 
 root:
-    cn: AS65342 Root CA
+    cn: Test Root CA
 
 intermediary:
-    cn: AS65342 Intermediary CA
+    cn: Test Intermediary CA
 
 autosign:
-    cn: AS65342 Infrastructure CA
+    cn: Test Infrastructure CA
     unit: Autosign
     days: 365

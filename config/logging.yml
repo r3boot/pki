@@ -17,7 +17,7 @@ handlers:
   logfile:
     class: logging.handlers.RotatingFileHandler
     formatter: logfile
-    filename: pki.log
+    filename: unittest.log
     maxBytes: 102400
     backupCount: 3
 

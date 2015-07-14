@@ -8,7 +8,7 @@ sys.path.append('.')
 from pkilib import log
 
 CFG_FILE = './config/logging.yml'
-LOG_FILE = 'pki.log'
+LOG_FILE = 'unittest.log'
 LOG_HANDLER = 'unittest'
 
 
