@@ -25,6 +25,7 @@ ROOT_CFG = '{0}/cfg/{1}.cfg'.format(ROOT_BASEDIR, ROOT_NAME)
 ROOT_KEY = '{0}/private/{1}.key'.format(ROOT_BASEDIR, ROOT_NAME)
 ROOT_CSR = '{0}/csr/{1}.csr'.format(ROOT_BASEDIR, ROOT_NAME)
 ROOT_CRT = '{0}/certs/{1}.pem'.format(ROOT_BASEDIR, ROOT_NAME)
+ROOT_BUNDLE = '{0}/certs/{1}-bundle.pem'.format(ROOT_BASEDIR, ROOT_NAME)
 ROOT_CRL = '{0}/crl/{1}.crl'.format(ROOT_BASEDIR, ROOT_NAME)
 ROOT_EXT = 'root_ca_ext'
 
@@ -603,3 +604,50 @@ class test_OpenSSL_gen_server_cfg:
 
     def test_4level(self):
         assert(self.ca.gen_server_cfg('some.invalid.host.name')) == False
+
+
+class test_OpenSSL_updatebundle:
+    def setUp(self):
+        log.LOGGER = log.get_handler(LOG_CFG, LOG_HANDLER)
+        config = yaml.load(open(CFG_FILE, 'r').read())
+
+        if os.path.exists(ROOT_BASEDIR):
+            shutil.rmtree(ROOT_BASEDIR)
+        if os.path.exists(INTERMEDIARY_BASEDIR):
+            shutil.rmtree(INTERMEDIARY_BASEDIR)
+
+        self.root = ssl.OpenSSL(config, ssl.CA_ROOT)
+        assert(self.root.setup_ca_structure()) == True
+        open(ROOT_CRT, 'w').write(ROOT_NAME)
+
+        self.inter = ssl.OpenSSL(config, ssl.CA_INTERMEDIARY)
+        assert(self.inter.setup_ca_structure()) == True
+        open(INTERMEDIARY_CRT, 'w').write(INTERMEDIARY_NAME)
+
+    def tearDown(self):
+        if os.path.exists(ROOT_BASEDIR):
+            shutil.rmtree(ROOT_BASEDIR)
+        if os.path.exists(INTERMEDIARY_BASEDIR):
+            shutil.rmtree(INTERMEDIARY_BASEDIR)
+
+    def test_nonobj_parent(self):
+        assert(self.inter.updatebundle('somerandomstring')) == False
+
+    def test_nonexistent_crt(self):
+        tmp_crt = '{0}.temp'.format(INTERMEDIARY_CRT)
+        shutil.move(INTERMEDIARY_CRT, tmp_crt)
+        assert(self.inter.updatebundle(self.root)) == False
+        shutil.move(tmp_crt, INTERMEDIARY_CRT)
+
+    def test_nonexistent_parent_crt(self):
+        tmp_crt = '{0}.temp'.format(ROOT_CRT)
+        shutil.move(ROOT_CRT, tmp_crt)
+        assert(self.inter.updatebundle(self.root)) == False
+        shutil.move(tmp_crt, ROOT_CRT)
+
+    def test_no_parent_bundle_generates_files(self):
+        assert(self.inter.updatebundle(self.root)) == True
+
+    def test_parent_bundle_generate_files(self):
+        open(ROOT_BUNDLE, 'w').write(ROOT_NAME)
+        assert(self.inter.updatebundle(self.root)) == True

@@ -45,6 +45,7 @@ class OpenSSL:
             'key': '{0}/private/{1}.key'.format(basedir, ca_name),
             'csr': '{0}/csr/{1}.csr'.format(basedir, ca_name),
             'crt': '{0}/certs/{1}.pem'.format(basedir, ca_name),
+            'bundle': '{0}/certs/{1}-bundle.pem'.format(basedir, ca_name),
             'crl': '{0}/crl/{1}.crl'.format(basedir, ca_name),
             'db': '{0}/db/{1}.db'.format(basedir, ca_name),
             'db_attr': '{0}/db/{1}.db_attr'.format(basedir, ca_name),
@@ -89,7 +90,10 @@ class OpenSSL:
             log.warning('{0} already exists'.format(basedir))
             return False
 
-        log.debug('Creating {0}'.format(basedir))
+        log.debug('Setting up directory structure for {0} CA'.format(
+            self.ca_data['name']
+        ))
+
         os.mkdir(basedir)
 
         # Setup CA directories
@@ -152,6 +156,7 @@ class OpenSSL:
             log.warning('Number of levels cannot exceed 3')
             return False
 
+        log.debug('Generating TLS configuration for {0}'.format(fqdn))
         template_data = open(server_template, 'r').read()
         template = mako.template.Template(template_data)
         template_cfg = self.ca_data
@@ -204,6 +209,7 @@ class OpenSSL:
                 if not os.path.exists(pwfile):
                     return False
 
+        log.debug('Generating key and csr for {0}'.format(name))
         cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
             cfg, csr, key
         )
@@ -253,6 +259,7 @@ class OpenSSL:
             log.warning('{0} already exists'.format(crt))
             return False
 
+        log.debug('Self-signing certificate for {0} CA'.format(name))
         cmdline = 'openssl ca -config {0} -in {1} -out {2} -batch'.format(
             cfg, csr, crt
         )
@@ -287,10 +294,13 @@ class OpenSSL:
             log.warning('{0} does not exist'.format(cfg))
             return False
 
+        log.debug('Updating certificate revocation list for {0} CA'.format(
+            self.ca_data['name']
+        ))
         cmdline = 'openssl ca -gencrl -config {0} -out {1}'.format(cfg, crl)
         if pwfile:
             cmdline += ' -passin file:{0}'.format(pwfile)
-        log.debug(utils.run(cmdline))
+        utils.run(cmdline)
         return os.path.exists(crl)
 
     def sign_intermediary(self, csr, crt, pwfile, days):
@@ -330,6 +340,9 @@ class OpenSSL:
             log.warning('days needs to be a number')
             return False
 
+        log.debug('Signing intermediary certificate using {0} CA'.format(
+            self.ca_data['name']
+        ))
         cmdline = 'openssl ca -config {0} -in {1} -out {2} -batch'.format(
             cfg, csr, crt
         )
@@ -374,10 +387,53 @@ class OpenSSL:
             log.warning('{0} already exists'.format(crt))
             return False
 
+        log.debug('Signing certificate using {0} CA'.format(
+            self.ca_data['name']
+        ))
         cmdline = 'openssl ca -config {0} -in {1} -out {2}'.format(
             cfg, csr, crt
         )
         cmdline += ' -batch -extensions server_ext'
-        log.debug(cmdline)
-        log.debug(utils.run(cmdline))
+        utils.run(cmdline)
         return os.path.exists(crt)
+
+    def updatebundle(self, parent=None):
+        """Generate a certificate bundle for this CA. It will use the parents
+        certificate bundle if it exists, and else it will use the parents
+        certificate. This function will return False if one of the following
+        conditions is met:
+
+        * parent is not an ssl.OpenSSL object
+        * The parents certificate could not be found
+        * The certificate for this CA could not be found
+
+        :param parent:  Instance of the parent CA
+        :type  parent:  ssl.OpenSSL
+        :returns:       Flag indicating the creation of the bundle
+        :rtype:         bool
+        """
+        if not isinstance(parent, OpenSSL):
+            log.warning('parent needs to be an ssl.OpenSSL object')
+            return False
+
+        parent_crt = None
+        if os.path.exists(parent.ca_data['bundle']):
+            parent_crt = parent.ca_data['bundle']
+        elif os.path.exists(parent.ca_data['crt']):
+            parent_crt = parent.ca_data['crt']
+        else:
+            log.warning('Cannot find a parent certificate')
+            return False
+
+        if not os.path.exists(self.ca_data['crt']):
+            log.warning('{0} does not exist'.format(self.ca_data['crt']))
+            return False
+
+        log.debug('Updating certificate bundle for {0} CA'.format(
+            self.ca_data['name']
+        ))
+        bundle_data = open(self.ca_data['crt'], 'r').read()
+        bundle_data += open(parent_crt, 'r').read()
+
+        open(self.ca_data['bundle'], 'w').write(bundle_data)
+        return os.path.exists(self.ca_data['bundle'])

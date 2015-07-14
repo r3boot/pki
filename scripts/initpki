@@ -6,27 +6,15 @@ import logging
 import logging.config
 import os
 import platform
-import pprint
-import shlex
-import subprocess
 import sys
 import tempfile
-import time
 
+import yaml
 
-# Handle external dependencies
-try:
-    import mako.template
-except ImportError:
-    print('Failed to import mako, please run "pip install mako"')
-    sys.exit(1)
+sys.path.append('.')
 
-try:
-    import yaml
-except ImportError:
-    print('Failed to import PyYaml, please run "pip install pyyaml"')
-    sys.exit(1)
-
+from pkilib import log
+from pkilib import ssl
 
 # Set module details
 __description__ = 'AS65342 PKI -- Initialization component'
@@ -34,11 +22,6 @@ __version__ = 0.2
 __author__ = 'Lex van Roon'
 __email__ = 'r3boot@r3blog.nl'
 __url__ = 'https://gitlab.as65342.net/r3boot/pki'
-
-# Distinguis various certs (temp?)
-CA_ROOT = 'root'
-CA_INTERMEDIARY = 'intermediary'
-CA_AUTOSIGN = 'autosign'
 
 
 # Various default values used as CLI arguments
@@ -50,548 +33,6 @@ _d_host = 'localhost'
 _d_port = 4392
 _d_root_pw = None
 _d_inter_pw = None
-
-
-# Global variable containing the python logger
-logger = None
-
-
-# Template for openssl.cnf
-root_ca_template = """# {{cn}}
-
-[ default ]
-ca                      = ${name}      # CA name
-dir                     = .           # Top dir
-base_url                = ${baseurl}           # CA base URL
-aia_url                 = ${baseurl}/{name}.pem     # CA certificate URL
-crl_url                 = ${baseurl}/{name}.crl     # CRL distribution point
-% if ca_type == "autosign":
-oscp_url                = ${oscpurl}
-% endif
-name_opt                = multiline,-esc_msb,utf8 # Display UTF-8 characters
-openssl_conf            = openssl_init          # Library config section
-
-# CA certificate request
-
-[ req ]
-default_bits            = ${crypto['bits']}              # RSA key size
-% if ca_type == "autosign":
-encrypt_key             = no                   # Protect private key
-% else:
-encrypt_key             = yes                   # Protect private key
-% endif
-default_md              = ${crypto['hash']}              # MD to use
-utf8                    = yes                   # Input is UTF-8
-string_mask             = utf8only              # Emit UTF-8 strings
-prompt                  = no                    # Don't prompt for DN
-distinguished_name      = ca_dn                 # DN section
-req_extensions          = ca_reqext             # Desired extensions
-
-[ ca_dn ]
-countryName             = "${country}"
-stateOrProvinceName     = "${province}"
-localityName            = "${city}"
-organizationName        = "${organization}"
-organizationalUnitName  = "${unit}"
-commonName              = "${cn}"
-
-[ ca_reqext ]
-keyUsage                = critical,keyCertSign,cRLSign
-% if ca_type == "autosign":
-basicConstraints        = critical,CA:true,pathlen:0
-% else:
-basicConstraints        = critical,CA:true
-% endif
-subjectKeyIdentifier    = hash
-
-# CA operational settings
-
-[ ca ]
-default_ca              = ${name}         # The default CA section
-
-[ ${name} ]
-certificate             = $dir/certs/$ca.pem       # The CA cert
-private_key             = $dir/private/$ca.key # CA private key
-new_certs_dir           = $dir/certs           # Certificate archive
-serial                  = $dir/db/$ca-crt.idx # Serial number file
-crlnumber               = $dir/db/$ca-crl.idx # CRL number file
-database                = $dir/db/$ca.db # Index file
-unique_subject          = no                    # Require unique subject
-default_days            = ${ca['days']}        # How long to certify for
-default_md              = ${crypto['hash']}              # MD to use
-policy                  = match_pol             # Default naming policy
-email_in_dn             = no                    # Add email to cert DN
-preserve                = no                    # Keep passed DN ordering
-name_opt                = $name_opt             # Subject DN display options
-cert_opt                = ca_default            # Certificate display options
-% if ca_type == "autosign":
-copy_extensions         = copy # Copy extensions from CSR
-% else:
-copy_extensions         = none                  # Copy extensions from CSR
-% endif
-% if ca_type == "root":
-x509_extensions         = intermediate_ca_ext   # Default cert extensions
-default_crl_days        = 30                    # How long before next CRL
-% elif ca_type == "intermediary":
-x509_extensions         = signing_ca_ext        # Default cert extensions
-default_crl_days        = 1                     # How long before next CRL
-% elif ca_type == "autosign":
-x509_extensions         = server_ext           # Default cert extensions
-default_crl_days        = 1                     # How long before next CRL
-% endif
-crl_extensions          = crl_ext               # CRL extensions
-
-[ match_pol ]
-countryName             = match
-stateOrProvinceName     = optional
-localityName            = optional
-organizationName        = match
-organizationalUnitName  = optional
-commonName              = supplied
-
-[ any_pol ]
-domainComponent         = optional
-countryName             = optional
-stateOrProvinceName     = optional
-localityName            = optional
-organizationName        = optional
-organizationalUnitName  = optional
-commonName              = optional
-emailAddress            = optional
-
-# Extensions
-% if ca_type == "root":
-[ root_ca_ext ]
-keyUsage                = critical,keyCertSign,cRLSign
-basicConstraints        = critical,CA:true
-subjectKeyIdentifier    = hash
-authorityKeyIdentifier  = keyid:always
-% endif %}
-% if ca_type != "autosign":
-[ intermediate_ca_ext ]
-keyUsage                = critical,keyCertSign,cRLSign
-basicConstraints        = critical,CA:true
-subjectKeyIdentifier    = hash
-authorityKeyIdentifier  = keyid:always
-authorityInfoAccess     = @issuer_info
-crlDistributionPoints   = @crl_info
-certificatePolicies     = MediumAssurance,MediumDevice
-% endif
-% if ca_type == "intermediate":
-[ signing_ca_ext ]
-keyUsage                = critical,keyCertSign,cRLSign
-basicConstraints        = critical,CA:true,pathlen:0
-subjectKeyIdentifier    = hash
-authorityKeyIdentifier  = keyid:always
-authorityInfoAccess     = @issuer_info
-crlDistributionPoints   = @crl_info
-certificatePolicies     = MediumAssurance,MediumDevice
-% endif
-% if ca_type == "autosign":
-[ server_ext ]
-keyUsage                = critical,digitalSignature,keyEncipherment
-basicConstraints        = CA:false
-extendedKeyUsage        = serverAuth,clientAuth
-subjectKeyIdentifier    = hash
-authorityKeyIdentifier  = keyid:always
-authorityInfoAccess     = @ocsp_info
-crlDistributionPoints   = @crl_info
-certificatePolicies     = MediumDevice
-
-[ ocspsign_ext ]
-keyUsage                = critical,nonRepudiation,digitalSignature
-basicConstraints        = CA:false
-extendedKeyUsage        = critical,OCSPSigning
-subjectKeyIdentifier    = hash
-authorityKeyIdentifier  = keyid:always
-authorityInfoAccess     = @issuer_info
-noCheck                 = null
-certificatePolicies     = MediumDevice
-% endif
-
-[ crl_ext ]
-authorityKeyIdentifier  = keyid:always
-authorityInfoAccess     = @issuer_info
-
-% if ca_type == "autosign":
-[ ocsp_info ]
-caIssuers;URI.0         = ${baseurl}/${name}.pem
-OCSP;URI.0              = ${oscpurl}
-
-% endif
-[ issuer_info ]
-caIssuers;URI.0         = ${baseurl}/${name}.pem
-
-[ crl_info ]
-URI.0                   = ${baseurl}/${name}.crl
-
-# Policy OIDs
-
-[ openssl_init ]
-oid_section             = additional_oids
-
-[ additional_oids ]
-% if ca_type != "autosign":
-MediumAssurance     = AS65342 Medium Assurance, 1.3.6.1.4.1.0.1.7.8
-% endif
-MediumDevice        = AS65342 Medium Device Assurance, 1.3.6.1.4.1.0.1.7.9
-"""
-
-
-def fpath(name):
-    """ fpath:      Helper function which converts a unix path to an openvms
-                    path.
-
-    @param:     name    String containing the unix path to convert
-    @return:    str     Translated path if running under vms, else name
-    """
-    if os.uname()[0] != 'OpenVMS':
-        return name
-    t = name.split('/')[1:]
-    device = t[0]
-    path = '.'.join(t[1:len(t)-1])
-    fname = t[len(t)-1]
-    return '{0}:[{1}]{2}'.format(device, path, fname)
-
-
-def fhost(name):
-    """ fhost:      Helper function which converts a dotted hostname to a
-                    underscore-based hostname to be used under openvms
-
-    @param:     name    String containing the hostname to convert
-    @return:    str     Translated hostname if running under vms, else name
-    """
-    return name.replace('.', '_')
-
-
-def run(cmd, stdin=False, stdout=False):
-    """ run:        Wrapper around subprocess.Popen to setup the various FDs
-
-    @param:     stdin   If True, make stdin a PIPE, else None
-    @param:     stdout  If True, make stdout a PIPE, else None
-    @return:    proc    Object containing the Popen result
-    """
-    cmd = shlex.split(cmd)
-
-    stdin_fd = None
-    if stdin:
-        stdin_fd = subprocess.PIPE
-
-    stdout_fd = None
-    if stdout:
-        stdout_fd = subprocess.PIPE
-
-    return subprocess.Popen(cmd, stdin=stdin_fd, stdout=stdout_fd)
-
-
-def info(message):
-    """ info:           Display an informational message
-
-    @param:     message Message to display
-    """
-    logger.info(message)
-
-
-def warning(message):
-    """ warning:    Display a warning message
-
-    @param:     message Message to display
-    """
-    logger.warning(message)
-
-
-def debug(message):
-    """ warning:    Display a debug message if debugging is enabled
-
-    @param:     message Message to display
-    """
-    logger.debug(message)
-
-
-def dump(obj):
-    """ dump:       Print anything using pprint
-
-    @param:     obj Anything that pprint will display
-    """
-    pprint.pprint(obj)
-
-
-def error(message):
-    """ warning:    Display an error message and exit the application
-
-    @param:     message Message to display
-    """
-    logger.error(message)
-    sys.exit(1)
-
-
-class CA:
-    """ CA:     Class representing a Certificate Authority
-    """
-    ca_type = None
-    ca = {}
-
-    def __init__(self, config):
-        """ __init__:   Initializes CA class
-
-        @param:     config  Dictionary containing the contents of the
-                            configuration file
-        """
-        self.cfg = config
-        name = '{0}-{1}'.format(self.cfg['common']['name'], self.ca_type)
-        basedir = '{0}/{1}'.format(self.cfg['common']['workspace'], name)
-
-        if not self.ca_type:
-            error('ca_type not defined')
-
-        days = 60*60*365*10
-        try:
-            days = self.cfg[self.ca_type]['days']
-        except KeyError:
-            days = self.cfg['common']['days']
-
-        self.ca = {
-            'name': name,
-            'type': self.ca_type,
-            'workspace': self.cfg['common']['workspace'],
-            'basedir': basedir,
-            'baseurl': self.cfg['common']['baseurl'],
-            'cfg': fpath('{0}/cfg/{1}.cfg'.format(basedir, name)),
-            'csr': fpath('{0}/csr/{1}.csr'.format(basedir, name)),
-            'crl': fpath('{0}/crl/{1}.crl'.format(basedir, name)),
-            'key': fpath('{0}/private/{1}.key'.format(basedir, name)),
-            'crt': fpath('{0}/certs/{1}.pem'.format(basedir, name)),
-            'bundle': fpath('{0}/certs/{1}-bundle.pem'.format(basedir, name)),
-            'days': days,
-            'db': fpath('{0}/db/{1}.db'.format(basedir, name)),
-            'db_attr': fpath('{0}/db/{1}-db.attr'.format(basedir, name)),
-            'crt_idx': fpath('{0}/db/{1}-crt.idx'.format(basedir, name)),
-            'crl_idx': fpath('{0}/db/{1}-crl.idx'.format(basedir, name)),
-        }
-        self.name = name
-        self.basedir = os.path.abspath(basedir)
-        self.ca_directories = ['certs', 'cfg', 'crl', 'csr', 'db', 'private']
-
-    def gen_enddate(self):
-        """ gen_enddate:    Helper function to generate an enddate timestamp
-
-        @returns:   str String containing the timestamp
-        """
-        days_s = self.ca['days'] * (60*60*24)
-        future_date = time.localtime(time.time() + days_s)
-        return time.strftime('%Y%m%d%H%M%SZ', future_date)
-
-    def setup(self):
-        """ setup:  Initialize the file structure for this CA
-        """
-        info('Setup directories for {0} CA'.format(self.ca['name']))
-
-        if os.path.exists(self.ca['basedir']):
-            error('{0} already exists'.format(self.ca['basedir']))
-        os.mkdir(self.ca['basedir'])
-
-        for directory in self.ca_directories:
-            fdir = '{0}/{1}'.format(self.ca['basedir'], directory)
-            if not os.path.exists(fdir):
-                info('Creating {0}/{1}'.format(self.ca['name'], directory))
-                os.mkdir(fdir)
-
-        info('Initialize databases for {0} CA'.format(self.ca['name']))
-        for empty_file in [self.ca['db'], self.ca['db_attr']]:
-            open(empty_file, 'w').write('')
-
-        for serial_file in [self.ca['crt_idx'], self.ca['crl_idx']]:
-            open(serial_file, 'w').write('01\n')
-
-        info('Installing openssl configuration file for {0} CA'.format(
-            self.ca['name']
-        ))
-        cfgfile = '{0}/cfg/{1}.cfg'.format(self.ca['basedir'], self.ca['name'])
-
-        cfg = {}
-        cfg.update(self.cfg['common'])
-
-        cfg.update(self.cfg[self.ca_type])
-
-        cfg['crypto'] = self.cfg['crypto']
-        cfg['basedir'] = '{0}/{1}'.format(self.ca['workspace'], self.name)
-        cfg['ca_type'] = self.ca_type
-        cfg['name'] = self.name
-        cfg['ca'] = self.ca
-
-        template = mako.template.Template(root_ca_template)
-        cfg_data = template.render(**cfg)
-        open(cfgfile, 'w').write('{0}\n'.format(cfg_data))
-
-    def initca(self):
-        """ initca      Empty function to be implemented by subclasses
-        """
-        warning('Feature not implemented')
-
-    def updatebundle(self):
-        """ updatebundle:   Update the certificate bundle for this CA
-        """
-        warning('Feature not implemented')
-
-    def updatecrl(self, pwfile):
-        """ updatecrl   Update the Certificate Revocation List for this CA
-        """
-        info('Generating crl for {0} CA'.format(self.ca['name']))
-        cmdline = 'openssl ca -gencrl -config {0} -out {1}'.format(
-            fpath(self.ca['cfg']),
-            fpath(self.ca['crl']),
-        )
-        if pwfile:
-            cmdline += ' -passin file:{0}'.format(pwfile)
-        os.chdir(self.basedir)
-        proc = run(cmdline)
-        proc.communicate()
-
-    def sign_intermediary(self, csr, crt, pwfile):
-        """ sign_intermediary:  Perform a intermediary certificate signing
-
-        @param:     csr Path to the Certificate Signing Request
-        @param:     crt Path to the output certificate
-        """
-        info('Signing certificate using {0} CA'.format(self.ca['name']))
-        cmdline = 'openssl ca -config {0} -in {1} -out {2} -batch'.format(
-            fpath(self.ca['cfg']),
-            fpath(csr),
-            fpath(crt),
-        )
-        cmdline += ' -passin file:{0}'.format(pwfile)
-        cmdline += ' -extensions intermediate_ca_ext -enddate {0}'.format(
-            self.gen_enddate()
-        )
-        os.chdir(self.basedir)
-        proc = run(cmdline, stdout=True)
-        proc.communicate()
-
-
-class RootCA(CA):
-    """ RootCA:     Class implementing the root CA
-    """
-    ca_type = CA_ROOT
-    ca = {}
-
-    def __init__(self, config):
-        """ __init__:       Initialize RootCA class
-
-        @param:     config  Dictionary containing the contents of the
-                            configuration file
-        """
-        CA.__init__(self, config)
-
-    def initca(self, pwfile):
-        """ initca:     Generate the key and certificate for this CA
-        """
-        info('Generating key and csr for {0} CA'.format(self.ca['name']))
-        cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
-            self.ca['cfg'], self.ca['csr'], self.ca['key'])
-        cmdline += ' -passout file:{0}'.format(pwfile)
-        os.chdir(self.basedir)
-        proc = run(cmdline, stdin=True, stdout=True)
-        proc.communicate()
-
-        info('Generating certificate for {0} CA'.format(self.ca['name']))
-        cmdline = 'openssl ca -selfsign -config {0} -in {1} -out {2}'.format(
-            self.ca['cfg'],
-            self.ca['csr'],
-            self.ca['crt'],
-        )
-        cmdline += ' -passin file:{0}'.format(pwfile)
-        cmdline += ' -batch -extensions root_ca_ext -enddate {0}'.format(
-            self.gen_enddate()
-        )
-        os.chdir(self.basedir)
-        proc = run(cmdline, stdout=True)
-        proc.communicate()
-
-
-class IntermediaryCA(CA):
-    """ IntermediaryCA:     Class implementing the intermediary CA
-    """
-    ca_type = CA_INTERMEDIARY
-    ca = {}
-
-    def __init__(self, config):
-        """ __init__:       Initializes IntermediaryCA class
-
-        @param:     config  Dictionary containing the contents of the
-                            configuration file
-        """
-        CA.__init__(self, config)
-
-    def initca(self, pwfile, parent=None):
-        """ initca:     Generate the intermediary key and sign it with the
-                        parent's key
-
-        @param:     parent  CA object containing the RootCA
-        """
-        if not parent:
-            error('initca needs a parent CA')
-        info('Generating key and csr for {0} CA'.format(self.ca['name']))
-        cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
-            self.ca['cfg'], self.ca['csr'], self.ca['key'])
-        cmdline += ' -passout file:{0}'.format(pwfile)
-        os.chdir(self.basedir)
-        proc = run(cmdline, stdout=True)
-        proc.communicate()
-
-        info('Generating certificate for {0} CA'.format(self.ca['name']))
-        parent.sign_intermediary(self.ca['csr'], self.ca['crt'], pwfile)
-
-    def updatebundle(self, parent=None):
-        """ updatebundle:   Update the certificate bundle for this CA
-        """
-        info('Updating certificate bundle for {0} CA'.format(self.ca['name']))
-        parent_bundle = parent.ca['crt']
-        bundle = open(self.ca['crt'], 'r').read()
-        bundle += open(parent_bundle, 'r').read()
-        open(self.ca['bundle'], 'w').write(bundle)
-
-
-class AutosignCA(CA):
-    """ AutosignCA:     Class implementing the autosign CA
-    """
-    ca_type = CA_AUTOSIGN
-    ca = {}
-
-    def __init__(self, config):
-        """ __init__:   Initializes the AutosignCA class
-
-        @param:     config  Dictionary containing the contents of the
-                            configuration file
-        """
-        CA.__init__(self, config)
-
-    def initca(self, pwfile, parent=None):
-        """ initca:     Generate the key for this CA and sign it with the
-                        parents key
-
-        @param:     parent  CA object containing the Intermediary CA
-        """
-        if not parent:
-            error('initca needs a parent CA')
-        info('Generating key and csr for {0} CA'.format(self.ca['name']))
-        cmdline = 'openssl req -new -config {0} -out {1} -keyout {2}'.format(
-            self.ca['cfg'], self.ca['csr'], self.ca['key'])
-        cmdline += ' -passout file:{0}'.format(pwfile)
-        os.chdir(self.basedir)
-        proc = run(cmdline, stdout=True)
-        proc.communicate()
-
-        info('Generating certificate for {0} CA'.format(self.ca['name']))
-        parent.sign_intermediary(self.ca['csr'], self.ca['crt'], pwfile)
-
-    def updatebundle(self, parent=None):
-        """ updatebundle:   Update the certificate bundle for this CA
-        """
-        info('Updating certificate bundle for {0} CA'.format(self.ca['name']))
-        parent_bundle = parent.ca['bundle']
-        bundle = open(self.ca['crt'], 'r').read()
-        bundle += open(parent_bundle, 'r').read()
-        open(self.ca['bundle'], 'w').write(bundle)
 
 
 if __name__ == '__main__':
@@ -611,12 +52,6 @@ if __name__ == '__main__':
                         ))
     parser.add_argument('-w', dest='workspace', action='store',
                         help='Override location where to store data')
-    parser.add_argument('-i', dest='host', action='store',
-                        type=str, default=_d_host,
-                        help='Ip address on which to bind the PKI service')
-    parser.add_argument('-p', dest='port', action='store',
-                        type=int, default=_d_port,
-                        help='Port on which to bind the PKI service')
     parser.add_argument('--root-pw', dest='root_pw', action='store',
                         type=str, default=_d_root_pw,
                         help='Password for Root CA')
@@ -629,30 +64,28 @@ if __name__ == '__main__':
     if not os.path.exists(args.log_cfgfile):
         print('Cannot find {0}, exiting'.format(args.log_cfgfile))
         sys.exit(1)
-    log_cfg = yaml.load(open(args.log_cfgfile, 'r').read())
 
     # Setup logging framework
-    logging.config.dictConfig(log_cfg)
-    logger = logging.getLogger('initpki')
+    log.LOGGER = log.get_handler(args.log_cfgfile, 'initpki')
 
     if args.debug:
-        logger.setLevel(logging.DEBUG)
+        log.LOGGER.setLevel(logging.DEBUG)
     else:
-        logger.setLevel(logging.INFO)
+        log.LOGGER.setLevel(logging.INFO)
 
     # Display the platform we're running on
-    debug('Running under Python {0} on {1}'.format(
+    log.debug('Running under Python {0} on {1}'.format(
         platform.python_version(),
         os.uname()[0],
     ))
 
     # Exit if configuration file does not exist
     if not os.path.exists(args.cfgfile):
-        error('{0} does not exist'.format(args.cfgfile))
+        log.error('{0} does not exist'.format(args.cfgfile))
 
     # All green, proceed with the program
-    debug('Using configuration from {0}'.format(args.cfgfile))
-    debug('Using {0} as a workspace'.format(args.workspace))
+    log.debug('Using configuration from {0}'.format(args.cfgfile))
+    log.debug('Using {0} as a workspace'.format(args.workspace))
 
     # Setup a restrictive umask
     old_umask = os.umask(0o027)
@@ -666,7 +99,7 @@ if __name__ == '__main__':
 
     # Check if workspace directory exists
     if not os.path.exists(config['common']['workspace']):
-        debug('Creating {0}'.format(config['common']['workspace']))
+        log.debug('Creating {0}'.format(config['common']['workspace']))
         os.mkdir(config['common']['workspace'])
 
     # Ask for the passwords for the Root CA
@@ -677,20 +110,20 @@ if __name__ == '__main__':
         i = 0
         while True:
             if i >= 3:
-                error('Too many failed passwords')
+                log.error('Too many failed passwords')
 
             root_pw = getpass.getpass('Enter password for Root CA: ')
             root_pw2 = getpass.getpass('Enter password for Root CA (again): ')
             if root_pw is None:
-                warning('Password cannot be empty')
+                log.warning('Password cannot be empty')
             elif len(root_pw) < 4:
-                warning('Password must be 4 chars minimum')
+                log.warning('Password must be 4 chars minimum')
             elif root_pw == root_pw2:
                 root_pw2 = None
                 break
             i += 1
         if not root_pw:
-            error('No password found for Root CA')
+            log.error('No password found for Root CA')
 
     root_pw_fd = tempfile.NamedTemporaryFile()
     root_pw_fd.write('{0}\n'.format(root_pw).encode())
@@ -706,41 +139,85 @@ if __name__ == '__main__':
         pw2str = 'Enter password for Intermediary CA (again): '
         while True:
             if i >= 3:
-                error('Too many failed passwords')
+                log.error('Too many failed passwords')
 
             inter_pw = getpass.getpass('Enter password for Intermediary CA: ')
             i_pw2 = getpass.getpass(pw2str)
             if inter_pw is None:
-                warning('Password cannot be empty')
+                log.warning('Password cannot be empty')
             elif len(inter_pw) < 4:
-                warning('Password must be 4 chars minimum')
+                log.warning('Password must be 4 chars minimum')
             elif inter_pw == i_pw2:
                 inter_pw2 = None
                 break
             i += 1
         if not inter_pw:
-            error('No password found for Intermediary CA')
+            log.error('No password found for Intermediary CA')
+
     inter_pw_fd = tempfile.NamedTemporaryFile()
     inter_pw_fd.write('{0}'.format(inter_pw).encode())
     inter_pw_fd.flush()
     inter_pw = inter_pw_fd.name
 
-    root = RootCA(config)
-    root.setup()
-    root.initca(root_pw)
-    root.updatecrl(root_pw)
+    # Setup Root CA
+    root = ssl.OpenSSL(config, ssl.CA_ROOT)
+    name = root.ca_data['name']
+    cfg = root.ca_data['cfg']
+    if not root.setup_ca_structure():
+        log.error('Failed to setup CA structure for {0}'.format(name))
 
-    intermediary = IntermediaryCA(config)
-    intermediary.setup()
-    intermediary.initca(inter_pw, parent=root)
-    intermediary.updatecrl(inter_pw)
-    intermediary.updatebundle(parent=root)
+    if not root.genkey(cfg, name, pwfile=root_pw):
+        log.error('Failed to generate key and CSR for {0}'.format(name))
 
-    autosign = AutosignCA(config)
-    autosign.setup()
-    autosign.initca(inter_pw, parent=intermediary)
-    autosign.updatecrl(None)
-    autosign.updatebundle(parent=intermediary)
+    if not root.selfsign(name, pwfile=root_pw):
+        log.error('Failed to self-sign certificate for {0}'.format(name))
+
+    if not root.updatecrl(pwfile=root_pw):
+        log.error('Failed to update CRL for {0}'.format(name))
+
+    # Setup intermediary CA
+    intermediary = ssl.OpenSSL(config, ssl.CA_INTERMEDIARY)
+    name = intermediary.ca_data['name']
+    cfg = intermediary.ca_data['cfg']
+    csr = intermediary.ca_data['csr']
+    crt = intermediary.ca_data['crt']
+    days = intermediary.ca_data['days']
+    if not intermediary.setup_ca_structure():
+        log.error('Failed to setup CA structure for {0}'.format(name))
+
+    if not intermediary.genkey(cfg, name, pwfile=root_pw):
+        log.error('Failed to generate key and CSR for {0}'.format(name))
+
+    if not root.sign_intermediary(csr, crt, pwfile=root_pw, days=days):
+        log.error('Failed to self-sign certificate for {0}'.format(name))
+
+    if not intermediary.updatebundle(parent=root):
+        log.error('Failed to generate bundle for {0}'.format(name))
+
+    if not intermediary.updatecrl(pwfile=root_pw):
+        log.error('Failed to update CRL for {0}'.format(name))
+
+    # Setup Autosign CA
+    autosign = ssl.OpenSSL(config, ssl.CA_AUTOSIGN)
+    name = autosign.ca_data['name']
+    cfg = autosign.ca_data['cfg']
+    csr = autosign.ca_data['csr']
+    crt = autosign.ca_data['crt']
+    days = autosign.ca_data['days']
+    if not autosign.setup_ca_structure():
+        log.error('Failed to setup CA structure for {0}'.format(name))
+
+    if not autosign.genkey(cfg, name, pwfile=root_pw):
+        log.error('Failed to generate key and CSR for {0}'.format(name))
+
+    if not intermediary.sign_intermediary(csr, crt, pwfile=root_pw, days=days):
+        log.error('Failed to self-sign certificate for {0}'.format(name))
+
+    if not autosign.updatebundle(parent=intermediary):
+        log.error('Failed to generate bundle for {0}'.format(name))
+
+    if not autosign.updatecrl(pwfile=root_pw):
+        log.error('Failed to update CRL for {0}'.format(name))
 
     # Cleanup tempfiles
     root_pw_fd.close()
