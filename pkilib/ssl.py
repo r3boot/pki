@@ -73,6 +73,7 @@ class OpenSSL:
         """
         log.debug('parse_subject')
         log.debug(raw_subject)
+        log.debug(type(raw_subject))
         if not isinstance(raw_subject, str):
             log.warning('raw_subject needs to be a string')
             return False
