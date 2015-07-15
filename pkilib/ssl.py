@@ -188,8 +188,6 @@ class OpenSSL:
             log.debug(crt)
             cert_data = self.parse_certificate(crt)
             cn = cert_data['subject']['CN']
-            if not cn:
-                continue
             if cn not in data:
                 continue
 
