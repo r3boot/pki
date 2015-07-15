@@ -141,6 +141,7 @@ class OpenSSL:
 
         data = {}
         for line in utils.run(cmdline).split('\n'):
+            log.debug(line)
             if line.startswith('subject='):
                 raw_subject = line.strip().replace('subject= ', '')
                 data['subject'] = self.parse_subject(raw_subject)
