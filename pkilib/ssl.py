@@ -77,7 +77,8 @@ class OpenSSL:
             return False
 
         try:
-            raw_subject = raw_subject.decode('ascii', 'replace')
+            tmp = raw_subject.encode()
+            raw_subject = tmp.decode('ascii', 'replace')
         except AttributeError:
             pass
 
