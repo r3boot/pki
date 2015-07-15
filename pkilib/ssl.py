@@ -77,14 +77,11 @@ class OpenSSL:
             return False
 
         try:
-            tmp = raw_subject.encode()
-            raw_subject = tmp.decode('ascii', 'replace')
-        except AttributeError:
-            pass
-
-        if not isinstance(raw_subject, str):
-            log.warning('raw_subject needs to be a string')
+            '/' in raw_subject
+        except TypeError:
+            log.warning('raw_subject needs to be a valid string')
             return False
+
         if not raw_subject.startswith('/'):
             log.warning('{0} is an invalid subject'.format(raw_subject))
             return False
