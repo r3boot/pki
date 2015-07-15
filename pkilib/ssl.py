@@ -187,6 +187,7 @@ class OpenSSL:
         # Pass 2, read certificate details from disk
         certs = glob.glob('{0}/[0-9A-Z]*.pem'.format(certsdir))
         for crt in certs:
+            log.debug(crt)
             cert_data = self.parse_certificate(crt)
             cn = cert_data['subject']['CN']
             if not cn:
