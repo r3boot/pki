@@ -19,7 +19,7 @@ CA_INTERMEDIARY = 'intermediary'
 CA_AUTOSIGN = 'autosign'
 
 
-class OpenSSL:
+class OpenSSL(object):
     """Class representing a wrapper around the openssl command
 
     :param config:  Dictionary containing the PKI configuration file
