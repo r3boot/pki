@@ -144,7 +144,7 @@ class OpenSSL:
         data = {}
         for line in utils.run(cmdline).split('\n'):
             if line.startswith('subject='):
-                raw_subject = line.decode('utf-8').strip()
+                raw_subject = line.encode('utf-8').strip()
                 raw_subject = line.replace('subject= ', '')
                 data['subject'] = self.parse_subject(raw_subject)
             elif line.startswith('serial='):
