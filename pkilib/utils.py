@@ -14,7 +14,7 @@ import time
 C_OSNAME = os.uname()[0]
 
 
-def fpath(name):
+def fpath(name, isdir=False):
     """Helper function which converts a unix path to a vms path, but only
     if the function is called under vms. If it running on any other platform,
     return the original name. The pathname returned will be in DDCU
@@ -55,17 +55,21 @@ def fpath(name):
         ddcu = '{0}:'.format(device)
     elif num_components == 2:
         device = components[0]
-        if '.' in components[1]:
-            fname = components[1]
-            ddcu = '{0}:{1}'.format(device, fname)
-        else:
+        if isdir:
             path = components[1]
             ddcu = '{0}:[{1}]'.format(device, path)
+        else:
+            fname = components[1]
+            ddcu = '{0}:{1}'.format(device, fname)
     else:
         device = components[0]
-        path = '.'.join(components[1:num_components-1])
-        fname = components[num_components-1]
-        ddcu = '{0}:[{1}]{2}'.format(device, path, fname)
+        if isdir:
+            path = '.'.join(components[1:num_components])
+            ddcu = '{0}:[{1}]'.format(device, path)
+        else:
+            path = '.'.join(components[1:num_components-1])
+            fname = components[num_components-1]
+            ddcu = '{0}:[{1}]{2}'.format(device, path, fname)
     return ddcu
 
 
