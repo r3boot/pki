@@ -74,16 +74,16 @@ class test_fpath_vms:
 
 class test_gen_enddate:
     def test_return_type(self):
-        assert isinstance(utils.gen_enddate(10), str) == True
+        assert isinstance(utils.gen_enddate(10), str) is True
 
     def test_length(self):
         assert len(utils.gen_enddate(10)) == 15
 
     def test_invalid_input(self):
-        assert utils.gen_enddate('somerandomstring') == None
+        assert utils.gen_enddate('somerandomstring') is None
 
     def test_undefined_input(self):
-        assert utils.gen_enddate(None) == None
+        assert utils.gen_enddate(None) is None
 
 
 class test_run_unix:
@@ -91,19 +91,19 @@ class test_run_unix:
         assert utils.run('uname -s').strip() == os.uname()[0]
 
     def test_nonexisting(self):
-        assert utils.run('somerandomunknownfilename') == None
+        assert utils.run('somerandomunknownfilename') is None
 
     def test_stdout(self):
-        assert utils.run('uname -s', stdout=True) == None
+        assert utils.run('uname -s', stdout=True) is None
 
     def test_empty_command(self):
-        assert utils.run('') == None
+        assert utils.run('') is None
 
     def test_undefined_command(self):
-        assert utils.run(None) == None
+        assert utils.run(None) is None
 
     def test_integer_command(self):
-        assert utils.run(1234567890) == None
+        assert utils.run(1234567890) is None
 
     def test_list_command(self):
         assert utils.run(shlex.split('uname -s')).strip() == os.uname()[0]

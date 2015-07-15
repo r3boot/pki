@@ -14,10 +14,10 @@ LOG_HANDLER = 'unittest'
 
 class test_setup:
     def test_nonexisting_config(self):
-        assert(log.get_handler('somerandomnonexistingfile', 'none')) == None
+        assert log.get_handler('somerandomnonexistingfile', 'none') is None
 
     def test_existing_config(self):
-        assert(log.get_handler(CFG_FILE, LOG_HANDLER)) != None
+        assert log.get_handler(CFG_FILE, LOG_HANDLER) is not None
 
 
 class test_methods:
@@ -33,7 +33,7 @@ class test_methods:
 
     def test_debug_no_handler(self):
         log.LOGGER = None
-        assert(log.debug('Debug message')) == None
+        assert log.debug('Debug message') is None
         log.LOGGER = log.get_handler(CFG_FILE, LOG_HANDLER)
 
     @nose.with_setup(cleanup_logfile)
@@ -41,19 +41,19 @@ class test_methods:
         the_message = 'Debug message'
         log.debug(the_message)
         output = open(LOG_FILE, 'r').read().strip()
-        assert(the_message in output) == True
+        assert the_message in output
 
     @nose.with_setup(cleanup_logfile)
     def test_debug_heading(self):
         the_message = 'Debug message'
         log.debug(the_message)
         output = open(LOG_FILE, 'r').read().strip()
-        assert('DEBUG' in output) == True
+        assert 'DEBUG' in output
 
     @nose.tools.raises(SystemExit)
     def test_error_no_handler(self):
         log.LOGGER = None
-        assert(log.error('Error message')) == None
+        assert log.error('Error message') is None
         log.LOGGER = log.get_handler(CFG_FILE, LOG_HANDLER)
 
     @nose.tools.raises(SystemExit)
@@ -62,7 +62,7 @@ class test_methods:
         the_message = 'Error message'
         log.error(the_message)
         output = open(LOG_FILE, 'r').read().strip()
-        assert(the_message in output) == True
+        assert the_message in output
 
     @nose.tools.raises(SystemExit)
     @nose.with_setup(cleanup_logfile)
@@ -70,11 +70,11 @@ class test_methods:
         the_message = 'Error message'
         log.error(the_message)
         output = open(LOG_FILE, 'r').read().strip()
-        assert('ERROR' in output) == True
+        assert 'ERROR' in output
 
     def test_info_no_handler(self):
         log.LOGGER = None
-        assert(log.info('Informational message')) == None
+        assert log.info('Informational message') is None
         log.LOGGER = log.get_handler(CFG_FILE, LOG_HANDLER)
 
     @nose.with_setup(cleanup_logfile)
@@ -82,18 +82,18 @@ class test_methods:
         the_message = 'Informational message'
         log.info(the_message)
         output = open(LOG_FILE, 'r').read().strip()
-        assert(the_message in output) == True
+        assert the_message in output
 
     @nose.with_setup(cleanup_logfile, cleanup_logfile)
     def test_info_heading(self):
         the_message = 'Informational message'
         log.info(the_message)
         output = open(LOG_FILE, 'r').read().strip()
-        assert('INFO' in output) == True
+        assert 'INFO' in output
 
     def test_warning_no_handler(self):
         log.LOGGER = None
-        assert(log.warning('Warning message')) == None
+        assert log.warning('Warning message') is None
         log.LOGGER = log.get_handler(CFG_FILE, LOG_HANDLER)
 
     @nose.with_setup(cleanup_logfile)
@@ -101,11 +101,11 @@ class test_methods:
         the_message = 'Warning message'
         log.warning(the_message)
         output = open(LOG_FILE, 'r').read().strip()
-        assert(the_message in output) == True
+        assert the_message in output
 
     @nose.with_setup(cleanup_logfile)
     def test_warning_heading(self):
         the_message = 'Warning message'
         log.warning(the_message)
         output = open(LOG_FILE, 'r').read().strip()
-        assert('WARNING' in output) == True
+        assert 'WARNING' in output
