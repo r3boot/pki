@@ -8,12 +8,8 @@
 
 import glob
 import os
-import platform
-import sys
 
 import mako.template
-
-sys.path.append('.')
 
 from pkilib import utils
 from pkilib import log
@@ -62,7 +58,8 @@ class OpenSSL:
         self.ca_data['crypto'] = config['crypto']
         self.ca_data['name'] = ca_name
 
-    def parse_subject(self, raw_subject=None):
+    @staticmethod
+    def parse_subject(raw_subject=None):
         """Helper function which parses a string containing a certificate
         subject into a dictionary. It will return False if raw_subject is not
         a string or if it doesnt start with '/'.
@@ -89,8 +86,8 @@ class OpenSSL:
         raw_subject = raw_subject.strip()[1:]
         subject = {}
         for field in raw_subject.split('/'):
-            k, v = field.split('=')
-            subject[k] = v
+            key, value = field.split('=')
+            subject[key] = value
         return subject
 
     def parse_db_line(self, line):
@@ -109,16 +106,16 @@ class OpenSSL:
         if '\t' not in line:
             log.warning('{0} is an invalid line'.format(line))
 
-        t = line.split('\t')
-        if len(t) != 6:
+        tokens = line.split('\t')
+        if len(tokens) != 6:
             log.warning('Invalid number of fields')
             return False
 
-        status = t[0]
-        notbefore = t[1]
-        notafter = t[2]
-        serial = t[3]
-        subject = self.parse_subject(t[5])
+        status = tokens[0]
+        notbefore = tokens[1]
+        notafter = tokens[2]
+        serial = tokens[3]
+        subject = self.parse_subject(tokens[5])
 
         data = {
             'CN': subject['CN'],
@@ -167,11 +164,11 @@ class OpenSSL:
         :returns:   Flag indicating the status of the database update
         :rtype:     bool
         """
-        db = self.ca_data['db']
+        dbf = self.ca_data['db']
         certsdir = self.ca_data['certsdir']
 
-        if not os.path.exists(db):
-            log.warning('{0} does not exist'.format(db))
+        if not os.path.exists(dbf):
+            log.warning('{0} does not exist'.format(dbf))
             return False
         if not os.path.exists(certsdir):
             log.warning('{0} does not exist'.format(certsdir))
@@ -180,32 +177,27 @@ class OpenSSL:
         data = {}
 
         # Pass 1, read the OpenSSL certificate database
-        for line in open(db, 'r').readlines():
+        for line in open(dbf, 'r').readlines():
             cert_data = self.parse_db_line(line)
-            cn = cert_data['CN']
-            if cn not in data:
-                data[cn] = []
-            data[cn].append(cert_data)
-        log.debug('pass 1')
-        log.debug(data)
+            common_name = cert_data['CN']
+            if common_name not in data:
+                data[common_name] = []
+            data[common_name].append(cert_data)
 
         # Pass 2, read certificate details from disk
         certs = glob.glob('{0}/[0-9A-Z]*.pem'.format(certsdir))
         for crt in certs:
-            log.debug(crt)
             cert_data = self.parse_certificate(crt)
-            cn = cert_data['subject']['CN']
-            if cn not in data:
+            common_name = cert_data['subject']['CN']
+            if common_name not in data:
                 continue
 
             cn_certs = []
-            for db_crt in data[cn]:
+            for db_crt in data[common_name]:
                 if db_crt['serial'] == cert_data['serial']:
                     db_crt.update(cert_data)
                 cn_certs.append(db_crt)
-            data[cn] = cn_certs
-        log.debug('pass 2')
-        log.debug(data)
+            data[common_name] = cn_certs
 
         self.cert_db = data
         return True
@@ -224,11 +216,6 @@ class OpenSSL:
         basedir = self.ca_data['basedir']
         templates = self.ca_data['templates']
         cfg = self.ca_data['cfg']
-        db = self.ca_data['db']
-        db_attr = self.ca_data['db_attr']
-        crt_idx = self.ca_data['crt_idx']
-        crl_idx = self.ca_data['crl_idx']
-
         root_template = '{0}/root.template'.format(templates)
 
         # Check if root.template exists
@@ -248,25 +235,25 @@ class OpenSSL:
         os.mkdir(basedir)
 
         # Setup CA directories
-        for DIR in ['certs', 'cfg', 'crl', 'csr', 'db', 'private']:
-            dest_dir = '{0}/{1}'.format(basedir, DIR)
+        for directory in ['certs', 'cfg', 'crl', 'csr', 'db', 'private']:
+            dest_dir = '{0}/{1}'.format(basedir, directory)
             os.mkdir(dest_dir)
 
         # Initialize databases
-        for FILE in [db, db_attr]:
-            open(FILE, 'w').write('')
+        for new_file in [self.ca_data['db'], self.ca_data['db_attr']]:
+            open(new_file, 'w').write('')
 
         # Initialize indices
-        for FILE in [crt_idx, crl_idx]:
-            open(FILE, 'w').write('01\n')
+        for new_file in [self.ca_data['crt_idx'], self.ca_data['crl_idx']]:
+            open(new_file, 'w').write('01\n')
 
         # Initialize configuration file
         template_data = open(root_template, 'r').read()
         template = mako.template.Template(template_data)
         try:
             cfg_data = template.render(**self.ca_data)
-        except NameError as e:
-            log.warning('Failed to generate configuration: {0}'.format(e))
+        except NameError as err:
+            log.warning('Failed to generate configuration: {0}'.format(err))
             return False
         open(cfg, 'w').write(cfg_data)
 
@@ -294,11 +281,8 @@ class OpenSSL:
         if not os.path.exists(server_template):
             log.warning('{0} does not exist'.format(server_template))
             return False
-        if fqdn is None:
-            log.warning('Need a fqdn to generate configuration for')
-            return False
-        if fqdn == '':
-            log.warning('Need a fqdn to generate configuration for')
+        if not isinstance(fqdn, str):
+            log.warning('fqdn needs to be a string')
             return False
         if '.' not in fqdn:
             log.warning('Need atleast a two-level fqdn')
@@ -315,8 +299,8 @@ class OpenSSL:
         template_cfg['san'] = fqdn.split('.')[0]
         try:
             cfg_data = template.render(**template_cfg)
-        except NameError as e:
-            log.warning('Failed to generate configuration: {0}'.format(e))
+        except NameError as err:
+            log.warning('Failed to generate configuration: {0}'.format(err))
             return False
         return cfg_data
 
@@ -370,7 +354,7 @@ class OpenSSL:
         utils.run(cmdline)
         return os.path.exists(key)
 
-    def selfsign(self, name, pwfile=None):
+    def selfsign(self, name, pwfile):
         """Self-sign a certificate. It expects the following conditions to be
         true. If one of them is not met, this function will return False:
 
@@ -388,17 +372,15 @@ class OpenSSL:
         csr = '{0}/csr/{1}.csr'.format(self.ca_data['basedir'], name)
         crt = '{0}/certs/{1}.pem'.format(self.ca_data['basedir'], name)
 
-        if self.ca_data['ca_type'] == CA_ROOT:
-            if not pwfile:
-                log.warning('Need a password file')
-                return False
-            else:
-                if not os.path.exists(pwfile):
-                    return False
-        else:
+        if self.ca_data['ca_type'] != CA_ROOT:
             log.warning('{0} CA cannot be self-signed'.format(
                 self.ca_data['ca_type']
             ))
+            return False
+        try:
+            open(pwfile, 'r')
+        except (TypeError, EnvironmentError):
+            log.warning('{0} cannot be read'.format(pwfile))
             return False
         if not os.path.exists(cfg):
             log.warning('{0} does not exist'.format(cfg))

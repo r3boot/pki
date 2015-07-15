@@ -2,17 +2,13 @@ import glob
 import nose
 import os
 import shutil
-import sys
 
 # TODO: check for Country == 2 chars
 
 import yaml
 
-sys.path.append('.')
-
-
-from pkilib import log
-from pkilib import ssl
+import pkilib.log as log
+import pkilib.ssl as ssl
 
 CFG_FILE = './workspace/unittest/config/pki.yml'
 LOG_CFG = './workspace/unittest/config/logging.yml'
