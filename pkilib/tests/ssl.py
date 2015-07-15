@@ -676,6 +676,9 @@ class test_OpenSSL_parse_subject:
     def test_empty_subject(self):
         assert(self.root.parse_subject('')) == False
 
+    def test_numeric_subject(self):
+        assert(self.root.parse_subject(12345)) == False
+
     def test_invalid_subject(self):
         subj = 'C=NL/ST=Province/L=City/O=Test/OU=Test/CN={0}'.format(
             TLS_NAME

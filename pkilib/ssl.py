@@ -8,6 +8,7 @@
 
 import glob
 import os
+import platform
 import sys
 
 import mako.template
@@ -71,6 +72,15 @@ class OpenSSL:
         :returns:           Dictionary containing the parsed subject or False
         :rtype:             dict, bool
         """
+        if raw_subject is None:
+            log.warning('raw_subject cannot be None')
+            return False
+
+        try:
+            raw_subject = raw_subject.decode('ascii', 'replace')
+        except AttributeError:
+            pass
+
         if not isinstance(raw_subject, str):
             log.warning('raw_subject needs to be a string')
             return False
@@ -144,7 +154,6 @@ class OpenSSL:
             log.debug(line)
             if line.startswith('subject='):
                 raw_subject = line.strip().replace('subject= ', '')
-                raw_subject = raw_subject.encode('ascii', 'replace')
                 data['subject'] = self.parse_subject(raw_subject)
             elif line.startswith('serial='):
                 data['serial'] = line.strip().replace('serial=', '')
