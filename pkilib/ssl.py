@@ -71,6 +71,8 @@ class OpenSSL:
         :returns:           Dictionary containing the parsed subject or False
         :rtype:             dict, bool
         """
+        log.debug('parse_subject')
+        log.debug(raw_subject)
         if not isinstance(raw_subject, str):
             log.warning('raw_subject needs to be a string')
             return False
@@ -141,7 +143,6 @@ class OpenSSL:
 
         data = {}
         for line in utils.run(cmdline).split('\n'):
-            log.debug(line)
             if line.startswith('subject='):
                 raw_subject = line.strip().replace('subject= ', '')
                 data['subject'] = self.parse_subject(raw_subject)
