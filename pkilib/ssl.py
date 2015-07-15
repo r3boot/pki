@@ -61,7 +61,7 @@ class OpenSSL:
         self.ca_data['crypto'] = config['crypto']
         self.ca_data['name'] = ca_name
 
-    def parse_subject(self, raw_subject):
+    def parse_subject(self, raw_subject=None):
         """Helper function which parses a string containing a certificate
         subject into a dictionary. It will return False if raw_subject is not
         a string or if it doesnt start with '/'.
@@ -71,9 +71,6 @@ class OpenSSL:
         :returns:           Dictionary containing the parsed subject or False
         :rtype:             dict, bool
         """
-        log.debug('parse_subject')
-        log.debug(raw_subject)
-        log.debug(type(raw_subject))
         if not isinstance(raw_subject, str):
             log.warning('raw_subject needs to be a string')
             return False
@@ -146,8 +143,8 @@ class OpenSSL:
         for line in utils.run(cmdline).split('\n'):
             log.debug(line)
             if line.startswith('subject='):
-                raw_subject = line.encode('ascii').strip()
-                raw_subject = line.replace('subject= ', '')
+                raw_subject = line.strip().replace('subject= ', '')
+                raw_subject = raw_subject.encode('ascii', 'replace')
                 data['subject'] = self.parse_subject(raw_subject)
             elif line.startswith('serial='):
                 data['serial'] = line.strip().replace('serial=', '')
