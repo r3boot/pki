@@ -6,6 +6,7 @@
 .. moduleauthor:: Lex van Roon <r3boot@r3blog.nl>
 """
 
+import glob
 import os
 import sys
 
@@ -30,6 +31,7 @@ class OpenSSL:
     :type  ca_type: str
     """
     ca_data = {}
+    cert_db = {}
 
     def __init__(self, config, ca_type):
         if ca_type not in [CA_ROOT, CA_INTERMEDIARY, CA_AUTOSIGN]:
@@ -58,6 +60,145 @@ class OpenSSL:
         self.ca_data.update(config[ca_type])
         self.ca_data['crypto'] = config['crypto']
         self.ca_data['name'] = ca_name
+
+    def parse_subject(self, raw_subject):
+        """Helper function which parses a string containing a certificate
+        subject into a dictionary. It will return False if raw_subject is not
+        a string or if it doesnt start with '/'.
+
+        :param raw_subject: OpenSSL subject to parse
+        :type  raw_subject: str
+        :returns:           Dictionary containing the parsed subject or False
+        :rtype:             dict, bool
+        """
+        if not isinstance(raw_subject, str):
+            log.warning('raw_subject needs to be a string')
+            return False
+        if not raw_subject.startswith('/'):
+            log.warning('{0} is an invalid subject'.format(raw_subject))
+            return False
+
+        raw_subject = raw_subject.strip()[1:]
+        subject = {}
+        for field in raw_subject.split('/'):
+            k, v = field.split('=')
+            subject[k] = v
+        return subject
+
+    def parse_db_line(self, line):
+        """Helper function which parses a line in OpenSSL database format. It
+        will return False if line is not a string, or if it cannot be parsed
+        into the correct fields.
+
+        :param line:    Single line of OpenSSL database format content
+        :type  line:    str
+        :returns:       Dictionary containing the information or False
+        :rtype:         dict, bool
+        """
+        if not isinstance(line, str):
+            log.warning('line needs to be a string')
+            return False
+        if '\t' not in line:
+            log.warning('{0} is an invalid line'.format(line))
+
+        t = line.split('\t')
+        if len(t) != 6:
+            log.warning('Invalid number of fields')
+            return False
+
+        status = t[0]
+        notbefore = t[1]
+        notafter = t[2]
+        serial = t[3]
+        subject = self.parse_subject(t[5])
+
+        data = {
+            'CN': subject['CN'],
+            'status': status,
+            'notbefore': notbefore,
+            'notafter': notafter,
+            'serial': serial,
+            'subject': subject,
+        }
+        return data
+
+    def parse_certificate(self, crt):
+        """Helper function which parses a certificate and returns the subject,
+        fingerprint and serial in a dictionary. It will return False if the
+        certificate does not exist.
+
+        :param crt: Path to the certificate
+        :type  crt: str
+        :returns:   Dictionary containing the certificate details or False
+        :rtype:     dict, bool
+        """
+        if not os.path.exists(crt):
+            log.warning('{0} does not exist'.format(crt))
+            return False
+
+        cmdline = 'openssl x509 -in {0} -noout'.format(crt)
+        cmdline += ' -subject -fingerprint -serial'
+
+        data = {}
+        for line in utils.run(cmdline).split('\n'):
+            if line.startswith('subject='):
+                raw_subject = line.strip().replace('subject= ', '')
+                data['subject'] = self.parse_subject(raw_subject)
+            elif line.startswith('serial='):
+                data['serial'] = line.strip().replace('serial=', '')
+            elif line.startswith('SHA1'):
+                data['fp'] = line.strip().replace('SHA1 Fingerprint=', '')
+        return data
+
+    def update_cert_db(self):
+        """Helper function to update the in-memory certificate database. It
+        will return False if the CA database file or the certificate directory
+        cannot be found.
+
+        :returns:   Flag indicating the status of the database update
+        :rtype:     bool
+        """
+        db = self.ca_data['db']
+        certsdir = self.ca_data['certsdir']
+
+        if not os.path.exists(db):
+            log.warning('{0} does not exist'.format(db))
+            return False
+        if not os.path.exists(certsdir):
+            log.warning('{0} does not exist'.format(certsdir))
+            return False
+
+        data = {}
+
+        # Pass 1, read the OpenSSL certificate database
+        for line in open(db, 'r').readlines():
+            cert_data = self.parse_db_line(line)
+            cn = cert_data['CN']
+            if cn not in data:
+                data[cn] = []
+            data[cn].append(cert_data)
+        log.debug('pass 1')
+        log.debug(data)
+
+        # Pass 2, read certificate details from disk
+        certs = glob.glob('{0}/[0-9A-Z]*.pem'.format(certsdir))
+        for crt in certs:
+            cert_data = self.parse_certificate(crt)
+            cn = cert_data['subject']['CN']
+            if cn not in data:
+                continue
+
+            cn_certs = []
+            for db_crt in data[cn]:
+                if db_crt['serial'] == cert_data['serial']:
+                    db_crt.update(cert_data)
+                cn_certs.append(db_crt)
+            data[cn] = cn_certs
+        log.debug('pass 2')
+        log.debug(data)
+
+        self.cert_db = data
+        return True
 
     def setup_ca_structure(self):
         """Creates the directory structure for this CA and initializes it's
@@ -266,6 +407,7 @@ class OpenSSL:
         cmdline += ' -selfsign -extensions root_ca_ext'
         cmdline += ' -passin file:{0}'.format(pwfile)
         utils.run(cmdline)
+        self.update_cert_db()
         return os.path.exists(crt)
 
     def updatecrl(self, pwfile=None):
@@ -351,6 +493,7 @@ class OpenSSL:
             utils.gen_enddate(days)
         )
         utils.run(cmdline)
+        self.update_cert_db()
         return os.path.exists(crt)
 
     def sign(self, name):
@@ -395,6 +538,7 @@ class OpenSSL:
         )
         cmdline += ' -batch -extensions server_ext'
         utils.run(cmdline)
+        self.update_cert_db()
         return os.path.exists(crt)
 
     def updatebundle(self, parent=None):

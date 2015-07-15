@@ -1,3 +1,4 @@
+import glob
 import nose
 import os
 import shutil
@@ -5,7 +6,6 @@ import sys
 
 # TODO: check for Country == 2 chars
 
-import mako.template
 import yaml
 
 sys.path.append('.')
@@ -21,12 +21,14 @@ LOG_HANDLER = 'unittest'
 ROOT_TEMPLATE = './workspace/templates/root.template'
 ROOT_NAME = 'test-root'
 ROOT_BASEDIR = './workspace/{0}'.format(ROOT_NAME)
+ROOT_CERTS = '{0}/certs'.format(ROOT_BASEDIR)
 ROOT_CFG = '{0}/cfg/{1}.cfg'.format(ROOT_BASEDIR, ROOT_NAME)
 ROOT_KEY = '{0}/private/{1}.key'.format(ROOT_BASEDIR, ROOT_NAME)
 ROOT_CSR = '{0}/csr/{1}.csr'.format(ROOT_BASEDIR, ROOT_NAME)
 ROOT_CRT = '{0}/certs/{1}.pem'.format(ROOT_BASEDIR, ROOT_NAME)
 ROOT_BUNDLE = '{0}/certs/{1}-bundle.pem'.format(ROOT_BASEDIR, ROOT_NAME)
 ROOT_CRL = '{0}/crl/{1}.crl'.format(ROOT_BASEDIR, ROOT_NAME)
+ROOT_DB = '{0}/db/{1}.db'.format(ROOT_BASEDIR, ROOT_NAME)
 ROOT_EXT = 'root_ca_ext'
 
 INTERMEDIARY_NAME = 'test-intermediary'
@@ -55,6 +57,7 @@ AUTOSIGN_KEY = '{0}/private/{1}.key'.format(AUTOSIGN_BASEDIR, AUTOSIGN_NAME)
 AUTOSIGN_CSR = '{0}/csr/{1}.csr'.format(AUTOSIGN_BASEDIR, AUTOSIGN_NAME)
 AUTOSIGN_CRT = '{0}/certs/{1}.pem'.format(AUTOSIGN_BASEDIR, AUTOSIGN_NAME)
 AUTOSIGN_CRL = '{0}/crl/{1}.crl'.format(AUTOSIGN_BASEDIR, AUTOSIGN_NAME)
+AUTOSIGN_DB = '{0}/db/{1}.db'.format(AUTOSIGN_BASEDIR, AUTOSIGN_NAME)
 AUTOSIGN_EXT = 'server_ext'
 PWFILE = './workspace/pwfile.input'
 
@@ -651,3 +654,248 @@ class test_OpenSSL_updatebundle:
     def test_parent_bundle_generate_files(self):
         open(ROOT_BUNDLE, 'w').write(ROOT_NAME)
         assert(self.inter.updatebundle(self.root)) == True
+
+
+class test_OpenSSL_parse_subject:
+    def setUp(self):
+        log.LOGGER = log.get_handler(LOG_CFG, LOG_HANDLER)
+        self.config = yaml.load(open(CFG_FILE, 'r').read())
+
+        if os.path.exists(ROOT_BASEDIR):
+            shutil.rmtree(ROOT_BASEDIR)
+
+        self.root = ssl.OpenSSL(self.config, ssl.CA_ROOT)
+
+    def tearDown(self):
+        if os.path.exists(ROOT_BASEDIR):
+            shutil.rmtree(ROOT_BASEDIR)
+
+    def test_undefined_subject(self):
+        assert(self.root.parse_subject(None)) == False
+
+    def test_empty_subject(self):
+        assert(self.root.parse_subject('')) == False
+
+    def test_invalid_subject(self):
+        subj = 'C=NL/ST=Province/L=City/O=Test/OU=Test/CN={0}'.format(
+            TLS_NAME
+        )
+        assert(self.root.parse_subject(subj)) == False
+
+    def test_generates_dict(self):
+        subj = '/C=NL/ST=Province/L=City/O=Test/OU=Test/CN={0}'.format(
+            TLS_NAME
+        )
+        result = self.root.parse_subject(subj)
+        assert(isinstance(result, dict)) == True
+        assert(len(result) == 6) == True
+
+
+class test_OpenSSL_parse_db_line:
+    def setUp(self):
+        log.LOGGER = log.get_handler(LOG_CFG, LOG_HANDLER)
+        self.config = yaml.load(open(CFG_FILE, 'r').read())
+
+        if os.path.exists(ROOT_BASEDIR):
+            shutil.rmtree(ROOT_BASEDIR)
+
+        self.root = ssl.OpenSSL(self.config, ssl.CA_ROOT)
+
+    def tearDown(self):
+        if os.path.exists(ROOT_BASEDIR):
+            shutil.rmtree(ROOT_BASEDIR)
+
+    def test_undefined_line(self):
+        assert(self.root.parse_db_line(None)) == False
+
+    def test_empty_line(self):
+        assert(self.root.parse_db_line('')) == False
+
+    def test_line_no_fields(self):
+        assert(self.root.parse_db_line('blah')) == False
+
+    def test_invalid_fields(self):
+        line = 'V\t170621191933Z42\tunknown'
+        assert(self.root.parse_db_line(line)) == False
+
+    def test_generates_dictionary(self):
+        line = 'V\t170621191933Z\t\t42\tunknown'
+        line += '\t/C=NL/ST=Province/L=City/O=Test/OU=Test'
+        line += '/CN={0}'.format(TLS_NAME)
+        assert(isinstance(self.root.parse_db_line(line), dict)) == True
+
+
+class test_OpenSSL_parse_certificate_exceptions:
+    def setUp(self):
+        log.LOGGER = log.get_handler(LOG_CFG, LOG_HANDLER)
+        self.config = yaml.load(open(CFG_FILE, 'r').read())
+
+        if os.path.exists(ROOT_BASEDIR):
+            shutil.rmtree(ROOT_BASEDIR)
+
+        self.root = ssl.OpenSSL(self.config, ssl.CA_ROOT)
+
+    def tearDown(self):
+        if os.path.exists(ROOT_BASEDIR):
+            shutil.rmtree(ROOT_BASEDIR)
+
+    def test_nonexisting_certificate(self):
+        assert(self.root.parse_certificate(ROOT_CRT)) == False
+
+
+class test_OpenSSL_parse_certificate:
+    def setUp(self):
+        log.LOGGER = log.get_handler(LOG_CFG, LOG_HANDLER)
+        self.config = yaml.load(open(CFG_FILE, 'r').read())
+        open(PWFILE, 'w').write(ROOT_NAME)
+
+        if os.path.exists(ROOT_BASEDIR):
+            shutil.rmtree(ROOT_BASEDIR)
+
+        self.root = ssl.OpenSSL(self.config, ssl.CA_ROOT)
+        cfg = self.root.ca_data['cfg']
+        name = self.root.ca_data['name']
+        assert(self.root.setup_ca_structure()) == True
+        assert(self.root.genkey(cfg, name, pwfile=PWFILE)) == True
+        assert(self.root.selfsign(name, pwfile=PWFILE)) == True
+
+    def tearDown(self):
+        if os.path.exists(ROOT_BASEDIR):
+            shutil.rmtree(ROOT_BASEDIR)
+
+    def test_generates_dictionary(self):
+        result = self.root.parse_certificate(ROOT_CRT)
+        assert(isinstance(result, dict)) == True
+        assert(len(result) == 3) == True
+
+
+class test_OpenSSL_update_cert_db_exceptions:
+    def setUp(self):
+        log.LOGGER = log.get_handler(LOG_CFG, LOG_HANDLER)
+        self.config = yaml.load(open(CFG_FILE, 'r').read())
+
+        if os.path.exists(ROOT_BASEDIR):
+            shutil.rmtree(ROOT_BASEDIR)
+
+        self.root = ssl.OpenSSL(self.config, ssl.CA_ROOT)
+        assert(self.root.setup_ca_structure()) == True
+
+    def tearDown(self):
+        if os.path.exists(ROOT_BASEDIR):
+            shutil.rmtree(ROOT_BASEDIR)
+
+    def test_nonexisting_db(self):
+        tmp_db = '{0}.temp'.format(ROOT_DB)
+        shutil.move(ROOT_DB, tmp_db)
+        assert(self.root.update_cert_db()) == False
+        shutil.move(tmp_db, ROOT_DB)
+
+    def test_nonexisting_certs_dir(self):
+        tmp_certs_dir = '{0}.temp'.format(ROOT_CERTS)
+        shutil.move(ROOT_CERTS, tmp_certs_dir)
+        assert(self.root.update_cert_db()) == False
+        shutil.move(tmp_certs_dir, ROOT_CERTS)
+
+    def test_skip_list_creation(self):
+        line = 'V\t170621191933Z\t\t42\tunknown'
+        line += '\t/C=NL/ST=Province/L=City/O=Test/OU=Test'
+        line += '/CN={0}\n'.format(TLS_NAME)
+        db_data = line
+        db_data += line
+        open(ROOT_DB, 'w').write(db_data)
+        assert(self.root.update_cert_db()) == True
+        os.unlink(ROOT_DB)
+
+
+class test_OpenSSL_update_cert_db:
+    def setUp(self):
+        log.LOGGER = log.get_handler(LOG_CFG, LOG_HANDLER)
+        self.config = yaml.load(open(CFG_FILE, 'r').read())
+
+        open(PWFILE, 'w').write(ROOT_NAME)
+
+        if os.path.exists(ROOT_BASEDIR):
+            shutil.rmtree(ROOT_BASEDIR)
+        if os.path.exists(INTERMEDIARY_BASEDIR):
+            shutil.rmtree(INTERMEDIARY_BASEDIR)
+        if os.path.exists(AUTOSIGN_BASEDIR):
+            shutil.rmtree(AUTOSIGN_BASEDIR)
+
+        self.root = ssl.OpenSSL(self.config, ssl.CA_ROOT)
+        cfg = self.root.ca_data['cfg']
+        name = self.root.ca_data['name']
+        assert(self.root.setup_ca_structure()) == True
+        assert(self.root.genkey(cfg, name, pwfile=PWFILE)) == True
+        assert(self.root.selfsign(name, pwfile=PWFILE)) == True
+
+        self.inter = ssl.OpenSSL(self.config, ssl.CA_INTERMEDIARY)
+        cfg = INTERMEDIARY_CFG
+        name = INTERMEDIARY_NAME
+        csr = INTERMEDIARY_CSR
+        crt = INTERMEDIARY_CRT
+        assert(self.inter.setup_ca_structure()) == True
+        assert(self.inter.genkey(cfg, name, pwfile=PWFILE)) == True
+        assert(self.root.sign_intermediary(csr, crt, PWFILE, 1)) == True
+
+        self.autosign = ssl.OpenSSL(self.config, ssl.CA_AUTOSIGN)
+        cfg = AUTOSIGN_CFG
+        name = AUTOSIGN_NAME
+        csr = AUTOSIGN_CSR
+        crt = AUTOSIGN_CRT
+        assert(self.autosign.setup_ca_structure()) == True
+        assert(self.autosign.genkey(cfg, name, pwfile=PWFILE)) == True
+        assert(self.inter.sign_intermediary(csr, crt, PWFILE, 1)) == True
+
+        cfg_data = self.autosign.gen_server_cfg(TLS_NAME)
+        self.tmp_cfg = '{0}/cfg/{1}.cfg'.format(
+            self.root.ca_data['basedir'],
+            TLS_NAME
+        )
+        assert(cfg_data is not False) == True
+        open(self.tmp_cfg, 'w').write(cfg_data)
+        assert(self.autosign.genkey(self.tmp_cfg, TLS_NAME)) == True
+        assert(self.autosign.sign(TLS_NAME)) == True
+
+    def tearDown(self):
+        if os.path.exists(ROOT_BASEDIR):
+            shutil.rmtree(ROOT_BASEDIR)
+        if os.path.exists(INTERMEDIARY_BASEDIR):
+            shutil.rmtree(INTERMEDIARY_BASEDIR)
+        if os.path.exists(AUTOSIGN_BASEDIR):
+            shutil.rmtree(AUTOSIGN_BASEDIR)
+        if os.path.exists(PWFILE):
+            os.unlink(PWFILE)
+        if os.path.exists(self.tmp_cfg):
+            os.unlink(self.tmp_cfg)
+
+    def test_nocerts_updates_database(self):
+        open(AUTOSIGN_DB, 'w').write('')
+        assert(self.autosign.update_cert_db()) == True
+        assert(len(self.autosign.cert_db) == 0) == True
+
+    def test_certs_updates_database(self):
+        assert(self.autosign.update_cert_db()) == True
+        assert(len(self.autosign.cert_db) == 1) == True
+
+    def test_no_cert_data(self):
+        certs = glob.glob('{0}/[0-9A-Z]*.pem'.format(
+            self.autosign.ca_data['certsdir']
+        ))
+        for crt in certs:
+            os.unlink(crt)
+        assert(self.autosign.update_cert_db()) == True
+        assert(len(self.autosign.cert_db) == 1) == True
+        assert('fp' in self.autosign.cert_db[TLS_NAME]) == False
+
+    def test_cn_not_in_data(self):
+        open(AUTOSIGN_DB, 'w').write('')
+        assert(self.autosign.update_cert_db()) == True
+        assert(len(self.autosign.cert_db) == 0) == True
+
+    def test_invalid_serial(self):
+        tmp_db = open(AUTOSIGN_DB, 'r').read()
+        tmp_db = tmp_db.replace('\t01', '\t42')
+        open(AUTOSIGN_DB, 'w').write(tmp_db)
+        assert(self.autosign.update_cert_db()) == True
+        assert(len(self.autosign.cert_db) == 1) == True
+        assert(self.autosign.cert_db[TLS_NAME][0]['serial'] == '42') == True
