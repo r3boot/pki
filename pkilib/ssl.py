@@ -143,6 +143,7 @@ class OpenSSL:
 
         data = {}
         for line in utils.run(cmdline).split('\n'):
+            log.debug(line)
             if line.startswith('subject='):
                 raw_subject = line.encode('utf-8').strip()
                 raw_subject = line.replace('subject= ', '')
