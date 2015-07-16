@@ -1,0 +1,15 @@
+---                                                    
+# This file contains the configuration for a certificate client                 
+                                                                                
+api:                                                                            
+    url: http://${server_host}:${server_port}                                   
+    token: ${client_token}                                                      
+                                                                                
+certs:                                                                          
+    bits: ${crypto['bits']}                                                     
+    hash: ${crypto['hash']}                                                     
+    country: ${ca['country']}                                                   
+    province: ${ca['province']}                                                 
+    city: ${ca['city']}                                                         
+    organization: ${ca['organization']}                                         
+    unit: ${ca['unit']}

@@ -6,7 +6,9 @@
 .. moduleauthor:: Lex van Roon <r3boot@r3blog.nl>
 """
 
+import hashlib
 import os
+import random
 import shlex
 import subprocess
 import time
@@ -157,3 +159,18 @@ def gen_enddate(days):
     days_sec = days * (60*60*24)
     future_date = time.localtime(time.time() + days_sec)
     return time.strftime('%Y%m%d%H%M%SZ', future_date)
+
+
+def gentoken():
+    """Utility function which generates a token based on a sha256 hash of
+    a random value.
+
+    >>> gentoken()
+    '3b2b469df99db2e207cd6232124816caaee8e28401e495627e8209f08426f8d2'
+
+    :returns:   Random token
+    :rtype:     str
+    """
+    sha = hashlib.sha256()
+    sha.update(str(random.random()).encode('utf-8'))
+    return sha.hexdigest()

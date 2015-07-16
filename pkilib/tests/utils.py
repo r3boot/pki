@@ -121,3 +121,8 @@ class test_run_vms:
 
     def test_list_command(self):
         assert utils.run(shlex.split('uname -s')).strip() == os.uname()[0]
+
+
+class test_gentoken:
+    def test_generates_token(self):
+        assert len(utils.gentoken()) == 64
