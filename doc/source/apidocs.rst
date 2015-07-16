@@ -6,3 +6,4 @@ Source code documentation
    :glob:
 
    pkilib/*
+   pkilib/server/*

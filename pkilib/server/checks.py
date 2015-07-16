@@ -1,9 +1,9 @@
 """
-... module:: checks
-    :platform: Unix, VMS
-    :synopsis: Various helper utilities used for performing validation checks
+.. module:: checks
+   :platform: Unix, VMS
+   :synopsis: Various helper utilities used for performing validation checks
 
-... moduleauthor:: Lex van Roon <r3boot@r3blog.nl>
+.. moduleauthor:: Lex van Roon <r3boot@r3blog.nl>
 """
 
 import re
