@@ -5,6 +5,9 @@ import pkilib.server.checks as checks
 LOCALHOST_A = 'localhost'
 LOCALHOST_PTR = '127.0.0.1'
 
+TOKEN_STORE = './workspace/tokens.json'
+
+
 
 class test_valid_fqdn:
     def test_integer_fqdn(self):
@@ -74,3 +77,5 @@ class test_owns_fqdn:
 
     def test_owned_fqdn(self):
         assert checks.owns_fqdn(LOCALHOST_PTR, LOCALHOST_A) is True
+
+
