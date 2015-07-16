@@ -32,4 +32,5 @@ nosetests -v \
     --cover-inclusive \
     --cover-xml \
     --with-xunit \
-    pkilib/tests/*.py ${@}
+    pkilib/tests/*.py \
+    pkilib/server/tests/*.py
