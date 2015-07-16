@@ -174,3 +174,27 @@ def gentoken():
     sha = hashlib.sha256()
     sha.update(str(random.random()).encode('utf-8'))
     return sha.hexdigest()
+
+
+def mkstemp(prefix=''):
+    """Utility function which opens a file descriptor to a random file and
+    returns it. It is similar to tempfile.NamedTemporaryFile, except that
+    it will also work under OpenVMS. It differs in that you manually need to
+    cleanup the file. This function will return False if the file descriptor
+    cannot be opened.
+
+    >>> with mkstemp(prefix='/var/tmp/') as fdesc
+    ...     fdesc.write('something')
+    >>> os.unlink(fdesc)
+
+    :param prefix:  Prefix to use for the temporary file
+    :type  prefix:  str
+    :returns:       Opened file descriptor in wb mode or False
+    :rtype:         fd
+    """
+    try:
+        fname = '{0}{1}.tmp'.format(prefix, gentoken()[0:6])
+        fdesc = open(fname, 'wb')
+        return fdesc
+    except EnvironmentError:
+        return False

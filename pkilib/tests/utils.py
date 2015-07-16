@@ -126,3 +126,25 @@ class test_run_vms:
 class test_gentoken:
     def test_generates_token(self):
         assert len(utils.gentoken()) == 64
+
+
+class test_mkstemp:
+    def test_opens_fd_locally(self):
+        fd = utils.mkstemp()
+        assert fd.closed is False
+        assert os.path.exists(fd.name)
+        fd.close()
+        os.unlink(fd.name)
+
+    def test_opens_fd_var_tmp(self):
+        fd = utils.mkstemp(prefix='/var/tmp/')
+        assert fd.closed is False
+        assert os.path.exists(fd.name)
+        fd.close()
+        os.unlink(fd.name)
+
+    def test_not_allowed_prefix(self):
+        assert utils.mkstemp('/') is False
+
+    def test_nonexisting_prefix(self):
+        assert utils.mkstemp(prefix='/nonexisting/') is False
